@@ -66,55 +66,65 @@ describe('avatar service', () => {
     expect(save).not.toHaveBeenCalled();
   });
 
-  it('persists a verified image before cleaning up the previous owned asset', async () => {
-    const user = {
-      _id: { toString: () => 'user-123' },
-      displayName: 'Before',
-      email: 'user@example.com',
-      avatarUrl: 'https://res.cloudinary.com/test/image/upload/old.png',
-      avatarPublicId: 'avatar-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-      isActive: () => true,
-      save: vi.fn().mockResolvedValue({
+  it.each(['folder', 'asset_folder', 'conflicting', 'folder_prefixed_id'] as const)(
+    'persists an owned image when Cloudinary reports its owner in %s', async (folderShape) => {
+      const user = {
         _id: { toString: () => 'user-123' },
-        displayName: 'After',
+        displayName: 'Before',
         email: 'user@example.com',
-        avatarUrl: 'https://res.cloudinary.com/test/image/upload/avatar.png',
-      }),
-    };
-    vi.spyOn(User, 'findById').mockResolvedValue(user as never);
-    const requestedPublicId = 'avatar-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-    const ownerFolder = `chatapp/avatars/${createHash('sha256').update('user-123').digest('hex')}`;
-    vi.spyOn(cloudinary.api, 'resource')
-      .mockResolvedValueOnce({
-        public_id: requestedPublicId,
-        folder: ownerFolder,
-        resource_type: 'image',
-        secure_url: 'https://res.cloudinary.com/test/image/upload/new.png',
-        format: 'png',
-        bytes: 100,
-      } as never)
-      .mockResolvedValueOnce({
-        public_id: user.avatarPublicId,
-        folder: ownerFolder,
-        resource_type: 'image',
+        avatarUrl: 'https://res.cloudinary.com/test/image/upload/old.png',
+        avatarPublicId: 'avatar-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        isActive: () => true,
+        save: vi.fn().mockResolvedValue({
+          _id: { toString: () => 'user-123' },
+          displayName: 'After',
+          email: 'user@example.com',
+          avatarUrl: 'https://res.cloudinary.com/test/image/upload/avatar.png',
+        }),
+      };
+      vi.spyOn(User, 'findById').mockResolvedValue(user as never);
+      const ownerFolder = `chatapp/avatars/${createHash('sha256').update('user-123').digest('hex')}`;
+      const requestedAvatarName = 'avatar-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+      const requestedPublicId = folderShape === 'folder_prefixed_id'
+        ? `${ownerFolder}/${requestedAvatarName}`
+        : requestedAvatarName;
+      const ownerFolderMetadata = folderShape === 'folder' || folderShape === 'folder_prefixed_id'
+        ? { folder: ownerFolder }
+        : folderShape === 'asset_folder'
+          ? { asset_folder: ownerFolder }
+          : { folder: 'chatapp/avatars/another-owner', asset_folder: ownerFolder };
+      vi.spyOn(cloudinary.api, 'resource')
+        .mockResolvedValueOnce({
+          public_id: requestedPublicId,
+          ...ownerFolderMetadata,
+          resource_type: 'image',
+          secure_url: 'https://res.cloudinary.com/test/image/upload/new.png',
+          format: 'png',
+          bytes: 100,
+        } as never)
+        .mockResolvedValueOnce({
+          public_id: user.avatarPublicId,
+          folder: ownerFolder,
+          resource_type: 'image',
+        } as never);
+      const destroy = vi.spyOn(cloudinary.uploader, 'destroy').mockResolvedValue({
+        result: 'ok',
       } as never);
-    const destroy = vi.spyOn(cloudinary.uploader, 'destroy').mockResolvedValue({
-      result: 'ok',
-    } as never);
 
-    const result = await updateUserProfile({
-      userId: 'user-123',
-      displayName: 'After',
-      avatarPublicId: requestedPublicId,
-      credentials,
-      logger: createLogger('silent'),
-    });
+      const result = await updateUserProfile({
+        userId: 'user-123',
+        displayName: 'After',
+        avatarPublicId: requestedPublicId,
+        credentials,
+        logger: createLogger('silent'),
+      });
 
-    expect(result.displayName).toBe('After');
-    expect(user.avatarPublicId).toBe(requestedPublicId);
-    expect(user.save).toHaveBeenCalledOnce();
-    expect(destroy).toHaveBeenCalledWith('avatar-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', {
-      resource_type: 'image',
-    });
-  });
+      expect(result.displayName).toBe('After');
+      expect(user.avatarPublicId).toBe(requestedPublicId);
+      expect(user.save).toHaveBeenCalledOnce();
+      expect(destroy).toHaveBeenCalledWith('avatar-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', {
+        resource_type: 'image',
+      });
+    },
+  );
 });

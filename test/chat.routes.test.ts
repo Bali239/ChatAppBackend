@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { Types } from 'mongoose';
+import { v2 as cloudinary } from 'cloudinary';
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/app.js';
@@ -137,6 +139,17 @@ describe('chat REST routes', () => {
       }),
     };
     vi.spyOn(User, 'findById').mockResolvedValue(user as never);
+    const avatarName = 'avatar-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const ownerFolder = `chatapp/avatars/${createHash('sha256').update(userId.toString()).digest('hex')}`;
+    const avatarPublicId = `${ownerFolder}/${avatarName}`;
+    vi.spyOn(cloudinary.api, 'resource').mockResolvedValue({
+      public_id: avatarPublicId,
+      folder: ownerFolder,
+      resource_type: 'image',
+      secure_url: 'https://res.cloudinary.com/test/image/upload/avatar.png',
+      format: 'png',
+      bytes: 100,
+    } as never);
     const agent = request.agent(createTestApp());
     const csrfToken = (await agent.get('/api/v1/auth/csrf')).body.data.csrfToken as string;
     await agent
@@ -148,10 +161,11 @@ describe('chat REST routes', () => {
     const response = await agent
       .patch('/api/v1/users/me/profile')
       .set('X-CSRF-Token', csrfToken)
-      .send({ displayName: '  Updated   Name ' })
+      .send({ displayName: '  Updated   Name ', avatarPublicId })
       .expect(200);
 
     expect(user.displayName).toBe('Updated Name');
+    expect(user.avatarPublicId).toBe(avatarPublicId);
     expect(user.save).toHaveBeenCalledOnce();
     expect(response.body.data.user.email).toBe('current@example.com');
   });

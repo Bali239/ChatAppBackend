@@ -78,10 +78,12 @@ async function getOwnedImageResource(
   try {
     const resource = await cloudinary.api.resource(publicId, { resource_type: 'image' });
     const asset = resource as CloudinaryImageResource;
-    const folder = asset.folder ?? asset.asset_folder;
+    const folders = [asset.folder, asset.asset_folder].filter(
+      (folder): folder is string => typeof folder === 'string',
+    );
     if (
       asset.public_id !== publicId ||
-      folder !== ownerFolder(userId) ||
+      !folders.includes(ownerFolder(userId)) ||
       asset.resource_type !== 'image'
     ) {
       return null;
@@ -117,7 +119,12 @@ export async function updateUserProfile(input: {
     if (!input.credentials) {
       throw new AppError(503, 'AVATAR_UPLOAD_UNAVAILABLE', 'Avatar uploads are not configured');
     }
-    if (!/^avatar-[a-f\d-]{36}$/.test(input.avatarPublicId)) {
+    const avatarName = input.avatarPublicId.split('/').at(-1) ?? '';
+    const hasValidName = /^avatar-[a-f\d-]{36}$/.test(avatarName);
+    const hasValidPath =
+      input.avatarPublicId === avatarName ||
+      input.avatarPublicId === `${ownerFolder(input.userId)}/${avatarName}`;
+    if (!hasValidName || !hasValidPath) {
       throw new AppError(400, 'INVALID_AVATAR', 'Avatar upload could not be verified');
     }
 

@@ -33,7 +33,9 @@ const profileUpdateSchema = z.object({
     .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), 'Display name contains invalid characters')
     .transform((value) => value.replace(/\s+/g, ' '))
     .optional(),
-  avatarPublicId: z.string().regex(/^avatar-[a-f\d-]{36}$/).optional(),
+  avatarPublicId: z.string()
+    .regex(/^(?:avatar-[a-f\d-]{36}|chatapp\/avatars\/[a-f\d]{64}\/avatar-[a-f\d-]{36})$/)
+    .optional(),
 }).strict().refine(
   (value) => value.displayName !== undefined || value.avatarPublicId !== undefined,
   'At least one editable profile field is required',
