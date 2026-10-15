@@ -73,9 +73,24 @@ export async function startServer(
         resolveListen();
       });
     });
-  } catch {
+  } catch (error) {
     await new Promise<void>((resolveClose) => io.close(() => resolveClose()));
     await disconnectDatabase(logger);
+    logger.error(
+      {
+        errorType: error instanceof Error ? error.name : 'UnknownError',
+        errorCode:
+          error && typeof error === 'object' && 'code' in error
+            ? String(error.code)
+            : undefined,
+        syscall:
+          error && typeof error === 'object' && 'syscall' in error
+            ? String(error.syscall)
+            : undefined,
+        port: environment.PORT,
+      },
+      'HTTP server listen failed',
+    );
     throw new Error('HTTP server failed to start');
   }
 
