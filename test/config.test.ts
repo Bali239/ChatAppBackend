@@ -26,6 +26,13 @@ describe('environment configuration', () => {
       NODE_ENV: 'production',
       MONGODB_URI: 'mongodb://127.0.0.1:27017/chat_app',
       FRONTEND_URL: 'https://chat.example.com',
+      SESSION_SECRET: 'this_is_a_valid_session_secret_value',
+      GOOGLE_CLIENT_ID: 'google-client-id',
+      GOOGLE_CLIENT_SECRET: 'google-client-secret',
+      GOOGLE_CALLBACK_URL: 'https://api.example.com/api/v1/auth/google/callback',
+      POST_LOGIN_REDIRECT_URL: 'https://chat.example.com/dashboard',
+      POST_LOGOUT_REDIRECT_URL: 'https://chat.example.com/',
+      AUTH_REDIRECT_ALLOWLIST: 'https://chat.example.com/dashboard,https://chat.example.com/',
       COOKIE_SECURE: 'true',
       COOKIE_SAME_SITE: 'none',
     };
@@ -54,5 +61,45 @@ describe('environment configuration', () => {
         COOKIE_SECURE: 'false',
       }),
     ).toThrow(/COOKIE_SECURE/);
+  });
+
+  it('requires production OAuth and session settings to be configured', () => {
+    const productionBase = {
+      NODE_ENV: 'production',
+      PORT: '4000',
+      MONGODB_URI: 'mongodb://127.0.0.1:27017/chat_app',
+      FRONTEND_URL: 'https://app.example.com',
+      COOKIE_SECURE: 'true',
+      SESSION_SECRET: 'this_is_a_valid_session_secret_value',
+      GOOGLE_CLIENT_ID: 'google-client-id',
+      GOOGLE_CLIENT_SECRET: 'google-client-secret',
+      GOOGLE_CALLBACK_URL: 'https://api.example.com/api/v1/auth/google/callback',
+      POST_LOGIN_REDIRECT_URL: 'https://app.example.com/dashboard',
+      POST_LOGOUT_REDIRECT_URL: 'https://app.example.com/',
+      AUTH_REDIRECT_ALLOWLIST: 'https://app.example.com/dashboard,https://app.example.com/',
+    };
+
+    expect(() => parseEnvironment(productionBase)).not.toThrow();
+
+    expect(() =>
+      parseEnvironment({
+        ...productionBase,
+        SESSION_SECRET: undefined,
+      }),
+    ).toThrow(/SESSION_SECRET/);
+
+    expect(() =>
+      parseEnvironment({
+        ...productionBase,
+        GOOGLE_CLIENT_ID: undefined,
+      }),
+    ).toThrow(/GOOGLE_CLIENT_ID/);
+
+    expect(() =>
+      parseEnvironment({
+        ...productionBase,
+        GOOGLE_CALLBACK_URL: 'http://api.example.com/api/v1/auth/google/callback',
+      }),
+    ).toThrow(/GOOGLE_CALLBACK_URL/);
   });
 });

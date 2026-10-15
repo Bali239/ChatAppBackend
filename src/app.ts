@@ -6,8 +6,10 @@ import { rateLimit } from 'express-rate-limit';
 import helmet from 'helmet';
 import type { DatabaseStatus } from './config/database.js';
 import { createCorsOptions } from './config/cors.js';
+import { createSessionMiddleware } from './config/session.js';
 import { createErrorHandler } from './middleware/error-handler.js';
 import { notFoundHandler } from './middleware/not-found.js';
+import { createAuthRouter, type AuthRouterOptions } from './routes/auth.routes.js';
 import { createHealthRouter } from './routes/health.routes.js';
 import type { Environment } from './schemas/env.schema.js';
 import { sendErrorResponse } from './utils/error.js';
@@ -18,16 +20,39 @@ export interface AppOptions {
   environment: Environment['NODE_ENV'];
   logger: AppLogger;
   getDatabaseStatus: () => DatabaseStatus;
+  sessionSecret?: string;
+  sessionCookieName?: string;
+  mongoUri?: string;
+  auth?: AuthRouterOptions;
 }
 
 export function createApp(options: AppOptions): Express {
   const app = express();
   app.disable('x-powered-by');
-  app.use(helmet());
+  app.set('trust proxy', 1);
+  app.set('env', options.environment);
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+    }),
+  );
   app.use(cors(createCorsOptions(options.frontendOrigins)));
   app.use(compression());
   app.use(express.json({ limit: '1mb' }));
+  app.use(express.urlencoded({ extended: false }));
   app.use(cookieParser());
+  app.use(
+    createSessionMiddleware({
+      secret: options.sessionSecret ?? 'development-session-secret-change-me',
+      cookieName: options.sessionCookieName ?? '__Host-chat_session',
+      mongoUri: options.mongoUri,
+      secure: options.environment === 'production',
+      sameSite: options.environment === 'production' ? 'none' : 'lax',
+      maxAge: options.auth?.sessionIdleTimeoutMs ?? 7 * 24 * 60 * 60 * 1000,
+      isProduction: options.environment === 'production',
+    }),
+  );
   app.use(createHttpLogger(options.logger));
 
   const api = express.Router();
@@ -42,6 +67,10 @@ export function createApp(options: AppOptions): Express {
     }),
   );
   api.use(createHealthRouter(options.getDatabaseStatus));
+  api.use('/auth', createAuthRouter({
+    ...options.auth,
+    cookieName: options.sessionCookieName,
+  }));
   app.use(createHealthRouter(options.getDatabaseStatus));
   app.use('/api/v1', api);
 

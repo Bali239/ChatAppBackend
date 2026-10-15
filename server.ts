@@ -24,6 +24,18 @@ export async function startServer(
     environment: environment.NODE_ENV,
     logger,
     getDatabaseStatus,
+    sessionSecret: environment.SESSION_SECRET ?? 'development-session-secret-change-me',
+    sessionCookieName: environment.COOKIE_NAME,
+    mongoUri: environment.MONGODB_URI,
+    auth: {
+      googleClientId: environment.GOOGLE_CLIENT_ID,
+      googleClientSecret: environment.GOOGLE_CLIENT_SECRET,
+      googleCallbackUrl: environment.GOOGLE_CALLBACK_URL,
+      postLoginRedirectUrl: environment.POST_LOGIN_REDIRECT_URL,
+      redirectAllowlist: environment.AUTH_REDIRECT_ALLOWLIST,
+      sessionIdleTimeoutMs: environment.SESSION_IDLE_TIMEOUT_MS,
+      sessionAbsoluteTimeoutMs: environment.SESSION_ABSOLUTE_TIMEOUT_MS,
+    },
   });
   const httpServer = createServer(app);
 
