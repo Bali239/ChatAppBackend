@@ -37,6 +37,7 @@
     "@types/express-session": "^1.18.2",
     "@types/node": "^24.0.0",
     "@types/supertest": "^6.0.3",
+    "socket.io-client": "^4.8.4",
     "supertest": "^7.1.4",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",

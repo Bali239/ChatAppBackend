@@ -1,0 +1,98 @@
+# Deployment Guide
+
+This workspace contains two independent Git repositories. Deploy the client and server separately; no deployment or hosted service has been performed as part of this guide.
+
+## Environment Matrix
+
+| Variable | Owner | Local development | Vercel Preview | Vercel Production / Render |
+| --- | --- | --- | --- | --- |
+| `NEXT_PUBLIC_API_URL` | Vercel client build | `http://localhost:5000/api/v1` (match server `PORT`) | Staging backend URL ending in `/api/v1` | Production Render URL ending in `/api/v1` |
+| `NEXT_PUBLIC_SOCKET_URL` | Vercel client build | Backend origin, e.g. `http://localhost:5000` | Staging backend origin | Production Render origin |
+| `MONGODB_URI` | Server runtime | Local MongoDB or development Atlas database | Staging Render secret | Production Render secret |
+| `FRONTEND_URL` | Server runtime | Exact `http://localhost:3000` origin | Exact stable Preview origin(s), on staging only | Exact production Vercel origin(s) |
+| `PORT` | Render runtime / local server | `.env` value; example is `5000` | Render-assigned | Render-assigned |
+| `NODE_ENV` | Server runtime | `development` | `production` on Render | `production` |
+| `COOKIE_SECURE` | Server runtime | `false` for local HTTP | `true` | `true` |
+| `COOKIE_SAME_SITE` | Server runtime | `lax` | Set for the chosen staging topology | `none` for cross-site Vercel/Render cookies; requires `COOKIE_SECURE=true` |
+| `LOG_LEVEL` | Server runtime | `info` | `info` | `info` or `warn` |
+
+The public Next.js variables are embedded at build time. Changing them in Vercel requires a new build. They are URLs, not secrets. Do not add MongoDB credentials, OAuth credentials, session secrets, or other private values to `NEXT_PUBLIC_*` variables. `SESSION_SECRET` is not needed until session authentication is implemented.
+
+## Local Development
+
+1. Start a local MongoDB instance or use a dedicated development database. Copy `server/.env.example` to `server/.env`, set `MONGODB_URI`, and keep `FRONTEND_URL` set to the exact frontend origin.
+2. Start the backend from the server repository with `npm ci && npm run dev`. The checked-in example sets `PORT=5000`; if you choose another port, use the same port in both client URLs.
+3. Copy `client/.env.example` to `client/.env.local`, set `NEXT_PUBLIC_API_URL` to `http://localhost:<PORT>/api/v1` and `NEXT_PUBLIC_SOCKET_URL` to `http://localhost:<PORT>`, then run `npm ci && npm run dev` in the client repository.
+4. Check `http://localhost:<PORT>/api/v1/health`. It returns `200` only when MongoDB is connected and `503` otherwise.
+
+## Vercel Client
+
+The client is its own repository, so set the Vercel project root to that repository's root (`./`), not a `client/` subdirectory. Use the detected Next.js framework and `npm run build`; retain the committed `package-lock.json` and default install detection. Use a supported Node.js release (Next.js 16 requires Node.js 20.9 or newer).
+
+Configure `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_SOCKET_URL` separately in Vercel's Development, Preview, and Production environments. Development points to local services. Preview must point only to a staging Render service and staging database. Production points to the production Render service. Use a stable, explicitly configured Preview domain if the backend needs to allow Preview; never reflect arbitrary `*.vercel.app` origins or share production database credentials with Preview.
+
+## Render Backend
+
+The server is its own repository; use that repository root as the Render service root. [`render.yaml`](../render.yaml) defines a Node Web Service with:
+
+- Build: `npm ci && npm run build`
+- Start: `npm start` (runs the compiled `dist/server.js`)
+- Health check: `/api/v1/health`
+- Automatic deploys disabled so deployment remains an explicit release action
+
+Render supplies `PORT`. The server binds to `0.0.0.0`, connects to MongoDB before listening, and returns `503` from the health path until MongoDB is ready. Supply `MONGODB_URI` as a Render secret and set `FRONTEND_URL` to exact HTTPS origins. Use separate staging and production services/databases. Choose an always-on Render plan appropriate for long-lived Socket.IO connections; do not rely on ephemeral in-memory state across restarts.
+
+For Atlas, use a dedicated database user with least privilege and add the Render service's currently documented outbound IP ranges to Atlas Network Access. Allow local developer IPs only as needed. Avoid `0.0.0.0/0`; never place the connection string in source control or logs.
+
+## CORS, Cookies, and Authentication Boundary
+
+Express and Socket.IO use the same exact `FRONTEND_URL` allowlist with credentials enabled. A browser origin not on the list is rejected; requests without an `Origin` header remain usable for non-browser clients. CORS is not authentication or authorization. An allowed origin does not grant access to user data.
+
+The default Vercel and Render domains are cross-site. If future session cookies are used across them, browser requests need credentials, cookies need `HttpOnly`, `Secure`, `SameSite=None`, and HTTPS, and state-changing requests need CSRF protection. Browser third-party-cookie policies can still block cross-site cookies; custom sibling domains (for example, `app.example.com` and `api.example.com`) are preferable for session-based production authentication. Choose a narrow cookie path/domain and an explicit expiry policy.
+
+Authentication is not implemented. The current Socket.IO gateway only logs connect/disconnect and is not suitable for private production chat traffic. Before enabling private traffic, validate the same durable server-side session on HTTP requests and Socket.IO handshakes, authorize each conversation/room server-side, use a shared session store with expiry and revocation, and protect state-changing HTTP operations against CSRF. CORS alone must never be treated as an access control.
+
+## Connectivity Checks
+
+Run the automated checks from each repository root:
+
+```sh
+# Client
+npm ci
+npm run lint && npm run typecheck && npm test && npm run build
+
+# Server
+npm ci
+npm run typecheck && npm test && npm run build
+```
+
+The server integration test starts a local ephemeral listener and checks health, trusted credentialed CORS, untrusted-origin rejection, a Socket.IO handshake, and an unavailable endpoint without a real database. To probe a hosted service manually, use its health URL and compare a trusted origin response with an untrusted one:
+
+```sh
+curl -i https://your-backend.onrender.com/api/v1/health
+curl -i -H 'Origin: https://your-frontend.example' https://your-backend.onrender.com/api/v1/health
+curl -i -H 'Origin: https://untrusted.example' https://your-backend.onrender.com/api/v1/health
+```
+
+The trusted response should include the exact `Access-Control-Allow-Origin` and `Access-Control-Allow-Credentials: true`. The untrusted response must not grant CORS permission. Verify Socket.IO from the browser network panel or an authorized client; do not infer a successful WebSocket connection from a healthy HTTP response alone.
+
+## Troubleshooting
+
+- **Failed Vercel build:** confirm the Vercel root is the client repository root, Node.js is supported, `npm ci` uses the committed lockfile, and public API/socket variables are configured for the target environment before building.
+- **Unhealthy Render service:** inspect deploy logs, confirm `npm run build` outputs `dist/server.js`, verify Render supplies `PORT`, and check that `MONGODB_URI` and `FRONTEND_URL` are set. The health endpoint intentionally remains `503` until MongoDB connects.
+- **MongoDB connection failure:** check URI syntax, database user permissions, Atlas Network Access, DNS/SRV resolution, and Render outbound IP configuration. Never paste credentials into logs or issue reports.
+- **CORS failure:** compare the browser's exact scheme/host/port with `FRONTEND_URL`; check preflight status and credential headers. Do not use `*` or unrestricted origin reflection with credentials.
+- **Socket.IO failure:** check the client endpoint is the backend origin (not `/api/v1`), confirm Socket.IO protocol compatibility and backend logs, and remember that restarts can disconnect clients. Reconnection does not preserve session or business state.
+
+## Release Checklist
+
+- [ ] Client and server changes are reviewed in their respective repositories; lockfiles match manifests.
+- [ ] Client lint, typecheck, tests, and production build pass; server typecheck, tests, and production build pass.
+- [ ] Preview points to staging only, with no production database or secret reuse.
+- [ ] Vercel Production has the correct API base URL and separate Socket.IO origin.
+- [ ] Render has `NODE_ENV=production`, secret `MONGODB_URI`, exact HTTPS `FRONTEND_URL`, `COOKIE_SECURE=true`, and a health check at `/api/v1/health`.
+- [ ] Atlas network access allows only required sources; credentials are not in tracked files.
+- [ ] Hosted health and CORS checks pass, and the browser confirms Socket.IO connectivity.
+- [ ] No private chat traffic is enabled before shared HTTP/socket authentication and authorization are implemented.
+
+Local builds and tests can verify code and the isolated integration path. They do not verify Vercel or Render deployment, live Atlas access, real-domain cookie behavior, or browser third-party-cookie policy; those require provider access, configured secrets, and the deployed domains.

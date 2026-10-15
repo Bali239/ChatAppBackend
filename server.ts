@@ -34,7 +34,7 @@ export async function startServer(
     await new Promise<void>((resolveListen, rejectListen) => {
       const onError = (error: Error) => rejectListen(error);
       httpServer.once('error', onError);
-      httpServer.listen(environment.PORT, () => {
+      httpServer.listen(environment.PORT, '0.0.0.0', () => {
         httpServer.off('error', onError);
         resolveListen();
       });
@@ -50,18 +50,6 @@ export async function startServer(
   logger.info({ port }, 'HTTP and Socket.IO server listening');
 
   let shutdownPromise: Promise<void> | undefined;
-  const shutdown = (): Promise<void> => {
-    if (shutdownPromise) return shutdownPromise;
-
-    shutdownPromise = (async () => {
-      await new Promise<void>((resolveClose) => io.close(() => resolveClose()));
-      await disconnectDatabase(logger);
-      logger.info('Server shutdown complete');
-    })();
-
-    return shutdownPromise;
-  };
-
   const onSignal = (signal: NodeJS.Signals) => {
     logger.info({ signal }, 'Server shutdown requested');
     void shutdown().catch((error: unknown) => {
@@ -74,6 +62,21 @@ export async function startServer(
   };
   const onInterrupt = () => onSignal('SIGINT');
   const onTerminate = () => onSignal('SIGTERM');
+
+  const shutdown = (): Promise<void> => {
+    if (shutdownPromise) return shutdownPromise;
+
+    process.off('SIGINT', onInterrupt);
+    process.off('SIGTERM', onTerminate);
+    shutdownPromise = (async () => {
+      await new Promise<void>((resolveClose) => io.close(() => resolveClose()));
+      await disconnectDatabase(logger);
+      logger.info('Server shutdown complete');
+    })();
+
+    return shutdownPromise;
+  };
+
   process.once('SIGINT', onInterrupt);
   process.once('SIGTERM', onTerminate);
 
