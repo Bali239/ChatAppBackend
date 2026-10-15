@@ -1,5 +1,5 @@
 import type { CorsOptions } from 'cors';
-import { AppError } from '../utils/app-error.js';
+import { AppError } from '../utils/error.js';
 
 export function isTrustedOrigin(origins: readonly string[], origin: string | undefined): boolean {
   return origin === undefined || origins.includes(origin);

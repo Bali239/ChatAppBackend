@@ -1,7 +1,7 @@
 import type { ErrorRequestHandler } from 'express';
 import type { Environment } from '../schemas/env.schema.js';
 import type { AppLogger } from '../utils/logger.js';
-import { AppError } from '../utils/app-error.js';
+import { AppError, sendErrorResponse } from '../utils/error.js';
 
 function sanitizeDevelopmentMessage(message: string): string {
   return message.replace(/mongodb(?:\+srv)?:\/\/[^\s]+/gi, '[redacted MongoDB URI]');
@@ -45,12 +45,9 @@ export function createErrorHandler(
         ? sanitizeDevelopmentMessage(error.message)
         : handledError.message;
 
-    response.status(handledError.statusCode).json({
-      error: {
-        code: handledError.code,
-        message,
-        ...(handledError.details === undefined ? {} : { details: handledError.details }),
-      },
+    sendErrorResponse(response, handledError.statusCode, message, {
+      code: handledError.code,
+      ...(handledError.details === undefined ? {} : { details: handledError.details }),
     });
   };
 }

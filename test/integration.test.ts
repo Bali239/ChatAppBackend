@@ -33,8 +33,8 @@ describe('local HTTP and Socket.IO integration', () => {
     try {
       const healthResponse = await fetch(`${baseUrl}/api/v1/health`);
       expect(healthResponse.status).toBe(200);
-      const healthBody = (await healthResponse.json()) as { ready: boolean };
-      expect(healthBody.ready).toBe(true);
+      const healthBody = (await healthResponse.json()) as { data: { ready: boolean } };
+      expect(healthBody.data.ready).toBe(true);
 
       const trustedResponse = await fetch(`${baseUrl}/api/v1/health`, {
         headers: { Origin: trustedOrigin },

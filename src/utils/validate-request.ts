@@ -1,6 +1,6 @@
 import type { RequestHandler } from 'express';
 import type { ZodType } from 'zod';
-import { AppError } from './app-error.js';
+import { AppError } from './error.js';
 
 type RequestSchemas = Partial<Record<'body' | 'query' | 'params', ZodType>>;
 

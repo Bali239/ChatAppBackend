@@ -10,6 +10,7 @@ import { createErrorHandler } from './middleware/error-handler.js';
 import { notFoundHandler } from './middleware/not-found.js';
 import { createHealthRouter } from './routes/health.routes.js';
 import type { Environment } from './schemas/env.schema.js';
+import { sendErrorResponse } from './utils/error.js';
 import { createHttpLogger, type AppLogger } from './utils/logger.js';
 
 export interface AppOptions {
@@ -36,9 +37,8 @@ export function createApp(options: AppOptions): Express {
       limit: 100,
       standardHeaders: true,
       legacyHeaders: false,
-      message: {
-        error: { code: 'RATE_LIMITED', message: 'Too many requests' },
-      },
+      handler: (_request, response) =>
+        sendErrorResponse(response, 429, 'Too many requests', { code: 'RATE_LIMITED' }),
     }),
   );
   api.use(createHealthRouter(options.getDatabaseStatus));
