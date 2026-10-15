@@ -42,6 +42,7 @@ export function createApp(options: AppOptions): Express {
     }),
   );
   api.use(createHealthRouter(options.getDatabaseStatus));
+  app.use(createHealthRouter(options.getDatabaseStatus));
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);

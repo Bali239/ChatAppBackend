@@ -23,6 +23,21 @@ function createTestApp(databaseStatus: 'connected' | 'disconnected' = 'connected
 }
 
 describe('HTTP application', () => {
+  it('serves health at the root path', async () => {
+    const response = await request(createTestApp()).get('/health');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      statusCode: 200,
+      message: 'Service is healthy',
+      data: {
+        status: 'ok',
+        ready: true,
+        dependencies: { mongodb: 'connected' },
+      },
+    });
+  });
+
   it('returns process and database readiness from the health endpoint', async () => {
     const response = await request(createTestApp()).get('/api/v1/health');
 

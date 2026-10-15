@@ -11,7 +11,7 @@ cp .env.example .env
 npm run dev
 ```
 
-The API health endpoint is `GET http://localhost:<PORT>/api/v1/health`; the checked-in local example currently uses port `5000`, while the schema fallback is `4000`. `npm run build`, `npm start`, `npm run typecheck`, and `npm test` provide the production build, production start, strict type check, and test suite. The existing lint configuration belongs to the separate Next.js client; this backend package does not define a lint script.
+The health endpoint is `GET http://localhost:<PORT>/health` (also available at `/api/v1/health`); the checked-in local example currently uses port `5000`, while the schema fallback is `4000`. `npm run build`, `npm start`, `npm run typecheck`, and `npm test` provide the production build, production start, strict type check, and test suite. The existing lint configuration belongs to the separate Next.js client; this backend package does not define a lint script.
 
 ## Environment
 

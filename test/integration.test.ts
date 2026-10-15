@@ -31,7 +31,7 @@ describe('local HTTP and Socket.IO integration', () => {
     const baseUrl = `http://127.0.0.1:${address.port}`;
 
     try {
-      const healthResponse = await fetch(`${baseUrl}/api/v1/health`);
+      const healthResponse = await fetch(`${baseUrl}/health`);
       expect(healthResponse.status).toBe(200);
       const healthBody = (await healthResponse.json()) as { data: { ready: boolean } };
       expect(healthBody.data.ready).toBe(true);
