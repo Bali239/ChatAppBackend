@@ -1,23 +1,40 @@
 import { createServer } from 'node:http';
+import { Types } from 'mongoose';
 import { io as createSocketClient, type Socket } from 'socket.io-client';
+import { vi } from 'vitest';
 import { createApp } from '../src/app.js';
+import { createSessionMiddleware } from '../src/config/session.js';
+import { Conversation } from '../src/models/conversation.model.js';
+import { ConversationMember } from '../src/models/conversation-member.model.js';
+import { Message } from '../src/models/message.model.js';
+import { User } from '../src/models/user.model.js';
+import type { MessageAcknowledgement } from '../src/realtime/events.js';
 import { attachSocketServer } from '../src/realtime/socket.js';
 import { createLogger } from '../src/utils/logger.js';
 
 const trustedOrigin = 'http://localhost:3000';
 
 describe('local HTTP and Socket.IO integration', () => {
-  it('serves health, enforces credentialed CORS, and accepts an allowed socket handshake', async () => {
+  it('shares authenticated sessions with sockets and disconnects them on logout', async () => {
     const logger = createLogger('silent');
+    const authenticatedUserId = new Types.ObjectId();
+    let disconnectUserSockets: (userId: string) => void = () => undefined;
+    const sessionMiddleware = createSessionMiddleware({
+      secret: 'this_is_a_valid_session_secret_value',
+    });
     const app = createApp({
       frontendOrigins: [trustedOrigin],
       environment: 'test',
       logger,
       getDatabaseStatus: () => 'connected',
+      sessionMiddleware,
+      auth: { onLogout: (userId) => disconnectUserSockets(userId) },
     });
     const httpServer = createServer(app);
-    const socketServer = attachSocketServer(httpServer, [trustedOrigin], logger);
+    const socketServer = attachSocketServer(httpServer, [trustedOrigin], logger, sessionMiddleware);
+    disconnectUserSockets = (userId) => socketServer.in(`user:${userId}`).disconnectSockets(true);
     let client: Socket | undefined;
+    let authenticatedClient: Socket | undefined;
     let unavailableClient: Socket | undefined;
 
     await new Promise<void>((resolveListen) => {
@@ -79,10 +96,140 @@ describe('local HTTP and Socket.IO integration', () => {
         extraHeaders: { Origin: trustedOrigin },
       });
       await new Promise<void>((resolveConnect, rejectConnect) => {
-        client?.once('connect', resolveConnect);
-        client?.once('connect_error', rejectConnect);
+        client?.once('connect', () => rejectConnect(new Error('Unauthenticated socket connected')));
+        client?.once('connect_error', () => resolveConnect());
       });
-      expect(client.connected).toBe(true);
+      expect(client.connected).toBe(false);
+
+      vi.spyOn(User, 'findById').mockResolvedValue({
+        _id: authenticatedUserId,
+        accountStatus: 'active',
+        isActive: () => true,
+      } as never);
+      const csrfResponse = await fetch(`${baseUrl}/api/v1/auth/csrf`);
+      const sessionCookie = csrfResponse.headers.get('set-cookie')?.split(';')[0];
+      if (!sessionCookie) throw new Error('Expected an HTTP session cookie');
+      const csrfBody = (await csrfResponse.json()) as { data: { csrfToken: string } };
+      const loginResponse = await fetch(`${baseUrl}/api/v1/auth/mock-login`, {
+        method: 'POST',
+        headers: {
+          Origin: trustedOrigin,
+          'Content-Type': 'application/json',
+          Cookie: sessionCookie,
+          'X-CSRF-Token': csrfBody.data.csrfToken,
+        },
+        body: JSON.stringify({ userId: authenticatedUserId.toString() }),
+      });
+      expect(loginResponse.status).toBe(200);
+      const currentUserResponse = await fetch(`${baseUrl}/api/v1/auth/me`, {
+        headers: { Cookie: sessionCookie },
+      });
+      expect(currentUserResponse.status).toBe(200);
+
+      authenticatedClient = createSocketClient(baseUrl, {
+        withCredentials: true,
+        reconnection: false,
+        timeout: 2_000,
+        extraHeaders: { Origin: trustedOrigin, Cookie: sessionCookie },
+      });
+      await new Promise<void>((resolveConnect, rejectConnect) => {
+        authenticatedClient?.once('connect', resolveConnect);
+        authenticatedClient?.once('connect_error', (error) => rejectConnect(error));
+      });
+      expect(authenticatedClient.connected).toBe(true);
+
+      const invalidMessageAck = await new Promise<{ ok: boolean; error?: { code: string } }>(
+        (resolveAck) => {
+          authenticatedClient?.emit('message:send', {
+            conversationId: '0123456789abcdef01234567',
+            content: 'forged sender',
+            clientMessageId: 'client_key_123',
+            senderId: '0123456789abcdef01234567',
+          }, resolveAck);
+        },
+      );
+      expect(invalidMessageAck).toMatchObject({
+        ok: false,
+        error: { code: 'INVALID_MESSAGE' },
+      });
+
+      const recipientId = new Types.ObjectId();
+      const conversationId = new Types.ObjectId();
+      const messageId = new Types.ObjectId();
+      const createdAt = new Date();
+      vi.spyOn(ConversationMember, 'findOne').mockReturnValue({
+        select: vi.fn().mockReturnThis(),
+        lean: vi.fn().mockResolvedValue({ _id: new Types.ObjectId() }),
+      } as never);
+      vi.spyOn(Conversation, 'findById').mockReturnValue({
+        select: vi.fn().mockReturnThis(),
+        lean: vi.fn().mockResolvedValue({ participantIds: [authenticatedUserId, recipientId] }),
+      } as never);
+      vi.spyOn(Message, 'findOne').mockReturnValue({
+        lean: vi.fn().mockResolvedValue(null),
+      } as never);
+      vi.spyOn(User, 'findOne').mockReturnValue({
+        select: vi.fn().mockReturnThis(),
+        lean: vi.fn().mockResolvedValue({
+          displayName: 'Current User',
+          avatarUrl: null,
+        }),
+      } as never);
+      let messagePersisted = false;
+      vi.spyOn(Message, 'create').mockImplementation(async () => {
+        messagePersisted = true;
+        return {
+          _id: messageId,
+          conversationId,
+          senderId: authenticatedUserId,
+          senderSnapshot: { displayName: 'Current User', avatarUrl: null },
+          content: 'Persisted before ack',
+          clientMessageId: 'client_key_456',
+          createdAt,
+        } as never;
+      });
+      vi.spyOn(Conversation, 'updateOne').mockReturnValue(Promise.resolve({ acknowledged: true }) as never);
+      vi.spyOn(ConversationMember, 'updateMany').mockReturnValue(Promise.resolve({ acknowledged: true }) as never);
+      const validMessageAck = await new Promise<{ ok: boolean; message?: { id: string } }>(
+        (resolveAck) => {
+          authenticatedClient?.emit('message:send', {
+            conversationId: conversationId.toString(),
+            content: 'Persisted before ack',
+            clientMessageId: 'client_key_456',
+          }, (result: MessageAcknowledgement) => {
+            expect(messagePersisted).toBe(true);
+            resolveAck(result);
+          });
+        },
+      );
+      expect(validMessageAck).toMatchObject({ ok: true, message: { id: messageId.toString() } });
+
+      vi.spyOn(ConversationMember, 'findOne').mockReturnValue({
+        select: vi.fn().mockReturnThis(),
+        lean: vi.fn().mockResolvedValue(null),
+      } as never);
+      const forbiddenJoin = new Promise<{ code: string }>((resolveError) => {
+        authenticatedClient?.once('socket:error', resolveError);
+      });
+      authenticatedClient.emit('conversation:join', {
+        conversationId: '0123456789abcdef01234567',
+      });
+      await expect(forbiddenJoin).resolves.toMatchObject({ code: 'CONVERSATION_FORBIDDEN' });
+
+      const disconnected = new Promise<void>((resolveDisconnect) => {
+        authenticatedClient?.once('disconnect', () => resolveDisconnect());
+      });
+      const logoutResponse = await fetch(`${baseUrl}/api/v1/auth/logout`, {
+        method: 'POST',
+        headers: {
+          Origin: trustedOrigin,
+          Cookie: sessionCookie,
+          'X-CSRF-Token': csrfBody.data.csrfToken,
+        },
+      });
+      expect(logoutResponse.status).toBe(200);
+      await disconnected;
+      expect(authenticatedClient.connected).toBe(false);
 
       unavailableClient = createSocketClient('http://127.0.0.1:1', {
         reconnection: false,
@@ -97,6 +244,7 @@ describe('local HTTP and Socket.IO integration', () => {
       ).rejects.toBeDefined();
     } finally {
       client?.disconnect();
+      authenticatedClient?.disconnect();
       unavailableClient?.disconnect();
       await new Promise<void>((resolveClose) => socketServer.close(() => resolveClose()));
     }

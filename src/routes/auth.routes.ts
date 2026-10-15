@@ -21,6 +21,7 @@ export interface AuthRouterOptions {
   sessionIdleTimeoutMs?: number;
   sessionAbsoluteTimeoutMs?: number;
   cookieName?: string;
+  onLogout?: (userId: string) => void;
   oauthClient?: GoogleOAuthClient;
 }
 
@@ -106,6 +107,7 @@ export function createAuthRouter(options: AuthRouterOptions = {}): Router {
   });
 
   router.post('/logout', requireAuth, requireCsrf, (request, response) => {
+    const userId = request.user?.id;
     request.session.destroy((error) => {
       if (error) {
         response.status(500).json({
@@ -116,6 +118,7 @@ export function createAuthRouter(options: AuthRouterOptions = {}): Router {
         return;
       }
 
+      if (userId) options.onLogout?.(userId);
       response.clearCookie(options.cookieName ?? '__Host-chat_session', { path: '/' });
       sendSuccessResponse(response, 200, 'Logged out', { loggedOut: true });
     });

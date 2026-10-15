@@ -64,6 +64,10 @@ export const environmentSchema = z
     POST_LOGIN_REDIRECT_URL: z.string().url().optional(),
     POST_LOGOUT_REDIRECT_URL: z.string().url().optional(),
     AUTH_REDIRECT_ALLOWLIST: optionalUrlListSchema,
+    CLOUDINARY_CLOUD_NAME: z.string().min(1).optional(),
+    CLOUDINARY_API_KEY: z.string().min(1).optional(),
+    CLOUDINARY_API_SECRET: z.string().min(1).optional(),
+    CLOUDINARY_AVATAR_UPLOAD_PRESET: z.string().min(1).optional(),
     SESSION_IDLE_TIMEOUT_MS: z.coerce.number().int().min(1).default(7 * 24 * 60 * 60 * 1000),
     SESSION_ABSOLUTE_TIMEOUT_MS: z.coerce.number().int().min(1).default(30 * 24 * 60 * 60 * 1000),
     COOKIE_NAME: z.string().min(1).default('__Host-chat_session'),
@@ -96,6 +100,10 @@ export const environmentSchema = z
         GOOGLE_CALLBACK_URL: environment.GOOGLE_CALLBACK_URL,
         POST_LOGIN_REDIRECT_URL: environment.POST_LOGIN_REDIRECT_URL,
         POST_LOGOUT_REDIRECT_URL: environment.POST_LOGOUT_REDIRECT_URL,
+        CLOUDINARY_CLOUD_NAME: environment.CLOUDINARY_CLOUD_NAME,
+        CLOUDINARY_API_KEY: environment.CLOUDINARY_API_KEY,
+        CLOUDINARY_API_SECRET: environment.CLOUDINARY_API_SECRET,
+        CLOUDINARY_AVATAR_UPLOAD_PRESET: environment.CLOUDINARY_AVATAR_UPLOAD_PRESET,
       } satisfies Record<string, string | undefined>;
 
       Object.entries(requiredValues).forEach(([key, value]) => {

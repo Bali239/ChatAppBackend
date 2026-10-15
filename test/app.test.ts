@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import request from 'supertest';
 import { z } from 'zod';
 import { createApp } from '../src/app.js';
+import { createSessionMiddleware } from '../src/config/session.js';
 import { attachSocketServer } from '../src/realtime/socket.js';
 import { createErrorHandler } from '../src/middleware/error-handler.js';
 import { notFoundHandler } from '../src/middleware/not-found.js';
@@ -179,7 +180,10 @@ describe('success responses', () => {
 describe('Socket.IO transport', () => {
   it('attaches to the supplied HTTP server and only trusts configured origins', async () => {
     const httpServer = createServer();
-    const io = attachSocketServer(httpServer, [origin], logger);
+    const sessionMiddleware = createSessionMiddleware({
+      secret: 'this_is_a_valid_session_secret_value',
+    });
+    const io = attachSocketServer(httpServer, [origin], logger, sessionMiddleware);
     expect(io.httpServer).toBe(httpServer);
 
     await new Promise<void>((resolveListen) => httpServer.listen(0, resolveListen));

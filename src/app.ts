@@ -1,7 +1,7 @@
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
-import express, { type Express } from 'express';
+import express, { type Express, type RequestHandler } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import helmet from 'helmet';
 import type { DatabaseStatus } from './config/database.js';
@@ -10,7 +10,10 @@ import { createSessionMiddleware } from './config/session.js';
 import { createErrorHandler } from './middleware/error-handler.js';
 import { notFoundHandler } from './middleware/not-found.js';
 import { createAuthRouter, type AuthRouterOptions } from './routes/auth.routes.js';
+import { createConversationsRouter } from './routes/conversations.routes.js';
 import { createHealthRouter } from './routes/health.routes.js';
+import { createUploadsRouter } from './routes/uploads.routes.js';
+import { createUsersRouter } from './routes/users.routes.js';
 import type { Environment } from './schemas/env.schema.js';
 import { sendErrorResponse } from './utils/error.js';
 import { createHttpLogger, type AppLogger } from './utils/logger.js';
@@ -22,7 +25,14 @@ export interface AppOptions {
   getDatabaseStatus: () => DatabaseStatus;
   sessionSecret?: string;
   sessionCookieName?: string;
+  sessionMiddleware?: RequestHandler;
   mongoUri?: string;
+  cloudinary?: {
+    cloudName: string;
+    apiKey: string;
+    apiSecret: string;
+    avatarUploadPreset: string;
+  };
   auth?: AuthRouterOptions;
 }
 
@@ -42,17 +52,16 @@ export function createApp(options: AppOptions): Express {
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: false }));
   app.use(cookieParser());
-  app.use(
-    createSessionMiddleware({
-      secret: options.sessionSecret ?? 'development-session-secret-change-me',
-      cookieName: options.sessionCookieName ?? '__Host-chat_session',
-      mongoUri: options.mongoUri,
-      secure: options.environment === 'production',
-      sameSite: options.environment === 'production' ? 'none' : 'lax',
-      maxAge: options.auth?.sessionIdleTimeoutMs ?? 7 * 24 * 60 * 60 * 1000,
-      isProduction: options.environment === 'production',
-    }),
-  );
+  const sessionMiddleware = options.sessionMiddleware ?? createSessionMiddleware({
+    secret: options.sessionSecret ?? 'development-session-secret-change-me',
+    cookieName: options.sessionCookieName ?? '__Host-chat_session',
+    mongoUri: options.mongoUri,
+    secure: options.environment === 'production',
+    sameSite: options.environment === 'production' ? 'none' : 'lax',
+    maxAge: options.auth?.sessionIdleTimeoutMs ?? 7 * 24 * 60 * 60 * 1000,
+    isProduction: options.environment === 'production',
+  });
+  app.use(sessionMiddleware);
   app.use(createHttpLogger(options.logger));
 
   const api = express.Router();
@@ -71,6 +80,9 @@ export function createApp(options: AppOptions): Express {
     ...options.auth,
     cookieName: options.sessionCookieName,
   }));
+  api.use('/users', createUsersRouter({ cloudinary: options.cloudinary, logger: options.logger }));
+  api.use('/conversations', createConversationsRouter());
+  api.use('/uploads', createUploadsRouter({ cloudinary: options.cloudinary }));
   app.use(createHealthRouter(options.getDatabaseStatus));
   app.use('/api/v1', api);
 

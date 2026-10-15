@@ -30,6 +30,10 @@ describe('environment configuration', () => {
       GOOGLE_CLIENT_ID: 'google-client-id',
       GOOGLE_CLIENT_SECRET: 'google-client-secret',
       GOOGLE_CALLBACK_URL: 'https://api.example.com/api/v1/auth/google/callback',
+      CLOUDINARY_CLOUD_NAME: 'test-cloud',
+      CLOUDINARY_API_KEY: 'test-api-key',
+      CLOUDINARY_API_SECRET: 'test-api-secret',
+      CLOUDINARY_AVATAR_UPLOAD_PRESET: 'signed-avatar-preset',
       POST_LOGIN_REDIRECT_URL: 'https://chat.example.com/dashboard',
       POST_LOGOUT_REDIRECT_URL: 'https://chat.example.com/',
       AUTH_REDIRECT_ALLOWLIST: 'https://chat.example.com/dashboard,https://chat.example.com/',
@@ -63,6 +67,16 @@ describe('environment configuration', () => {
     ).toThrow(/COOKIE_SECURE/);
   });
 
+  it('allows incomplete Cloudinary values outside production so avatar upload can stay disabled', () => {
+    expect(() =>
+      parseEnvironment({
+        MONGODB_URI: 'mongodb://127.0.0.1:27017/chat_app',
+        FRONTEND_URL: 'http://localhost:3000',
+        CLOUDINARY_CLOUD_NAME: 'test-cloud',
+      }),
+    ).not.toThrow();
+  });
+
   it('requires production OAuth and session settings to be configured', () => {
     const productionBase = {
       NODE_ENV: 'production',
@@ -74,6 +88,10 @@ describe('environment configuration', () => {
       GOOGLE_CLIENT_ID: 'google-client-id',
       GOOGLE_CLIENT_SECRET: 'google-client-secret',
       GOOGLE_CALLBACK_URL: 'https://api.example.com/api/v1/auth/google/callback',
+      CLOUDINARY_CLOUD_NAME: 'test-cloud',
+      CLOUDINARY_API_KEY: 'test-api-key',
+      CLOUDINARY_API_SECRET: 'test-api-secret',
+      CLOUDINARY_AVATAR_UPLOAD_PRESET: 'signed-avatar-preset',
       POST_LOGIN_REDIRECT_URL: 'https://app.example.com/dashboard',
       POST_LOGOUT_REDIRECT_URL: 'https://app.example.com/',
       AUTH_REDIRECT_ALLOWLIST: 'https://app.example.com/dashboard,https://app.example.com/',
@@ -101,5 +119,12 @@ describe('environment configuration', () => {
         GOOGLE_CALLBACK_URL: 'http://api.example.com/api/v1/auth/google/callback',
       }),
     ).toThrow(/GOOGLE_CALLBACK_URL/);
+
+    expect(() =>
+      parseEnvironment({
+        ...productionBase,
+        CLOUDINARY_AVATAR_UPLOAD_PRESET: undefined,
+      }),
+    ).toThrow(/CLOUDINARY_AVATAR_UPLOAD_PRESET/);
   });
 });

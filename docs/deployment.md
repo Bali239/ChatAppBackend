@@ -10,13 +10,17 @@ This workspace contains two independent Git repositories. Deploy the client and 
 | `NEXT_PUBLIC_SOCKET_URL` | Vercel client build | Backend origin, e.g. `http://localhost:5000` | Staging backend origin | Production Render origin |
 | `MONGODB_URI` | Server runtime | Local MongoDB or development Atlas database | Staging Render secret | Production Render secret |
 | `FRONTEND_URL` | Server runtime | Exact `http://localhost:3000` origin | Exact stable Preview origin(s), on staging only | Exact production Vercel origin(s) |
+| `CLOUDINARY_CLOUD_NAME` | Server runtime | Optional while avatar uploads are disabled | Staging Cloudinary account | Production Cloudinary account |
+| `CLOUDINARY_API_KEY` | Server runtime secret | Optional while avatar uploads are disabled | Staging secret | Production secret |
+| `CLOUDINARY_API_SECRET` | Server runtime secret | Optional while avatar uploads are disabled | Staging secret | Production secret |
+| `CLOUDINARY_AVATAR_UPLOAD_PRESET` | Server runtime | Optional while avatar uploads are disabled | Signed staging preset | Signed production preset |
 | `PORT` | Render runtime / local server | `.env` value; example is `5000` | Render-assigned | Render-assigned |
 | `NODE_ENV` | Server runtime | `development` | `production` on Render | `production` |
 | `COOKIE_SECURE` | Server runtime | `false` for local HTTP | `true` | `true` |
 | `COOKIE_SAME_SITE` | Server runtime | `lax` | Set for the chosen staging topology | `none` for cross-site Vercel/Render cookies; requires `COOKIE_SECURE=true` |
 | `LOG_LEVEL` | Server runtime | `info` | `info` | `info` or `warn` |
 
-The public Next.js variables are embedded at build time. Changing them in Vercel requires a new build. They are URLs, not secrets. Do not add MongoDB credentials, OAuth credentials, session secrets, or other private values to `NEXT_PUBLIC_*` variables. `SESSION_SECRET` is not needed until session authentication is implemented.
+The public Next.js variables are embedded at build time. Changing them in Vercel requires a new build. They are URLs, not secrets. Do not add MongoDB credentials, OAuth credentials, session secrets, or other private values to `NEXT_PUBLIC_*` variables.
 
 ## Local Development
 
@@ -44,13 +48,21 @@ Render supplies `PORT`. The server binds to `0.0.0.0`, connects to MongoDB befor
 
 For Atlas, use a dedicated database user with least privilege and add the Render service's currently documented outbound IP ranges to Atlas Network Access. Allow local developer IPs only as needed. Avoid `0.0.0.0/0`; never place the connection string in source control or logs.
 
+## Chat Database Migration
+
+Before enabling chat traffic on an existing database, run `npm run migrate:chat-data` from the server package with the intended `MONGODB_URI`. This manual, idempotent migration backfills `normalizedDisplayName` for existing users in bounded batches and creates the indexes declared by the chat models. It does not run automatically at startup and does not delete data. Run it against staging first, verify the selected database, and schedule it as a release operation because index creation can consume database resources.
+
+## Cloudinary Avatar Setup
+
+Create a separate Cloudinary upload preset for each environment. Set it to **signed**, allow only `jpg`, `png`, and `webp`, and configure a maximum file size of `5242880` bytes. Do not expose `CLOUDINARY_API_SECRET` to Vercel or any `NEXT_PUBLIC_*` variable. The authenticated server signature binds the upload to a generated public ID and a per-user hashed folder. After direct upload, the client submits only the public ID; the server looks up and verifies the resource, owner folder, resource type, format, and actual byte count before changing the profile. Run an end-to-end upload check against staging credentials before enabling production uploads.
+
 ## CORS, Cookies, and Authentication Boundary
 
 Express and Socket.IO use the same exact `FRONTEND_URL` allowlist with credentials enabled. A browser origin not on the list is rejected; requests without an `Origin` header remain usable for non-browser clients. CORS is not authentication or authorization. An allowed origin does not grant access to user data.
 
-The default Vercel and Render domains are cross-site. If future session cookies are used across them, browser requests need credentials, cookies need `HttpOnly`, `Secure`, `SameSite=None`, and HTTPS, and state-changing requests need CSRF protection. Browser third-party-cookie policies can still block cross-site cookies; custom sibling domains (for example, `app.example.com` and `api.example.com`) are preferable for session-based production authentication. Choose a narrow cookie path/domain and an explicit expiry policy.
+The default Vercel and Render domains are cross-site. Browser requests need credentials, cookies need `HttpOnly`, `Secure`, `SameSite=None`, and HTTPS, and state-changing requests need CSRF protection. Browser third-party-cookie policies can still block cross-site cookies; custom sibling domains (for example, `app.example.com` and `api.example.com`) are preferable for session-based production authentication. Choose a narrow cookie path/domain and an explicit expiry policy.
 
-Authentication is not implemented. The current Socket.IO gateway only logs connect/disconnect and is not suitable for private production chat traffic. Before enabling private traffic, validate the same durable server-side session on HTTP requests and Socket.IO handshakes, authorize each conversation/room server-side, use a shared session store with expiry and revocation, and protect state-changing HTTP operations against CSRF. CORS alone must never be treated as an access control.
+The Socket.IO handshake validates the same Mongo-backed server session used by Express and checks the active user. Conversation joins, message sends, delivery/read receipts, and typing events verify membership server-side. CORS alone must never be treated as an access control. Process-local presence is limited to one backend instance until a shared presence store and compatible Socket.IO adapter are deployed. Socket events are not durable; clients must recover missed messages through the cursor-paginated history API after reconnect.
 
 ## Connectivity Checks
 

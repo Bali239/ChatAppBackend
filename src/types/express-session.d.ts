@@ -6,6 +6,7 @@ declare module 'express-session' {
     lastActivityAt?: Date;
     expiresAt?: Date;
     idleExpiresAt?: Date;
+    revokedAt?: Date | null;
     oauthState?: string;
     oauthNonce?: string;
     oauthReturnTo?: string;

@@ -5,6 +5,7 @@ import type { Server as SocketServer } from 'socket.io';
 import { createApp } from './src/app.js';
 import { connectDatabase, disconnectDatabase, getDatabaseStatus } from './src/config/database.js';
 import { loadEnvironment } from './src/config/env.js';
+import { createSessionMiddleware } from './src/config/session.js';
 import type { Environment } from './src/schemas/env.schema.js';
 import { attachSocketServer } from './src/realtime/socket.js';
 import { createLogger, type AppLogger } from './src/utils/logger.js';
@@ -19,14 +20,33 @@ export async function startServer(
   environment: Environment,
   logger: AppLogger,
 ): Promise<ServerRuntime> {
+  let disconnectUserSockets: (userId: string) => void = () => undefined;
+  const sessionMiddleware = createSessionMiddleware({
+    secret: environment.SESSION_SECRET ?? 'development-session-secret-change-me',
+    cookieName: environment.COOKIE_NAME,
+    mongoUri: environment.MONGODB_URI,
+    secure: environment.COOKIE_SECURE,
+    sameSite: environment.COOKIE_SAME_SITE,
+    maxAge: environment.SESSION_IDLE_TIMEOUT_MS,
+    isProduction: environment.NODE_ENV === 'production',
+  });
   const app = createApp({
     frontendOrigins: environment.FRONTEND_URL,
     environment: environment.NODE_ENV,
     logger,
     getDatabaseStatus,
-    sessionSecret: environment.SESSION_SECRET ?? 'development-session-secret-change-me',
-    sessionCookieName: environment.COOKIE_NAME,
-    mongoUri: environment.MONGODB_URI,
+    sessionMiddleware,
+    cloudinary: environment.CLOUDINARY_CLOUD_NAME &&
+      environment.CLOUDINARY_API_KEY &&
+      environment.CLOUDINARY_API_SECRET &&
+      environment.CLOUDINARY_AVATAR_UPLOAD_PRESET
+      ? {
+          cloudName: environment.CLOUDINARY_CLOUD_NAME,
+          apiKey: environment.CLOUDINARY_API_KEY,
+          apiSecret: environment.CLOUDINARY_API_SECRET,
+          avatarUploadPreset: environment.CLOUDINARY_AVATAR_UPLOAD_PRESET,
+        }
+      : undefined,
     auth: {
       googleClientId: environment.GOOGLE_CLIENT_ID,
       googleClientSecret: environment.GOOGLE_CLIENT_SECRET,
@@ -35,12 +55,14 @@ export async function startServer(
       redirectAllowlist: environment.AUTH_REDIRECT_ALLOWLIST,
       sessionIdleTimeoutMs: environment.SESSION_IDLE_TIMEOUT_MS,
       sessionAbsoluteTimeoutMs: environment.SESSION_ABSOLUTE_TIMEOUT_MS,
+      onLogout: (userId) => disconnectUserSockets(userId),
     },
   });
   const httpServer = createServer(app);
 
   await connectDatabase(environment.MONGODB_URI, logger);
-  const io = attachSocketServer(httpServer, environment.FRONTEND_URL, logger);
+  const io = attachSocketServer(httpServer, environment.FRONTEND_URL, logger, sessionMiddleware);
+  disconnectUserSockets = (userId) => io.in(`user:${userId}`).disconnectSockets(true);
 
   try {
     await new Promise<void>((resolveListen, rejectListen) => {
