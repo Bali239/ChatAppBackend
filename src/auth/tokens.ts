@@ -13,6 +13,7 @@ interface TokenPayload {
   purpose: 'access' | 'oauth-state';
   sub?: string;
   ver?: number;
+  sid?: string;
   clientState?: string;
   nonce?: string;
   returnTo?: string;
@@ -21,6 +22,7 @@ interface TokenPayload {
 export interface AccessTokenClaims {
   userId: string;
   tokenVersion: number;
+  sessionId: string;
   expiresAt: number;
 }
 
@@ -72,6 +74,7 @@ function verify(token: string, secret: string, nowSeconds = Math.floor(Date.now(
 export function issueAccessToken(
   userId: string,
   tokenVersion: number,
+  sessionId: string,
   secret: string,
   nowSeconds = Math.floor(Date.now() / 1000),
 ): string {
@@ -83,6 +86,7 @@ export function issueAccessToken(
     purpose: 'access',
     sub: userId,
     ver: tokenVersion,
+    sid: sessionId,
   }, secret);
 }
 
@@ -91,11 +95,17 @@ export function verifyAccessToken(token: string, secret: string): AccessTokenCla
   if (
     payload.purpose !== 'access' ||
     typeof payload.sub !== 'string' ||
-    !Number.isInteger(payload.ver)
+    !Number.isInteger(payload.ver) ||
+    typeof payload.sid !== 'string'
   ) {
     throw new Error('Invalid access token');
   }
-  return { userId: payload.sub, tokenVersion: payload.ver!, expiresAt: payload.exp };
+  return {
+    userId: payload.sub,
+    tokenVersion: payload.ver!,
+    sessionId: payload.sid,
+    expiresAt: payload.exp,
+  };
 }
 
 export function issueOAuthState(

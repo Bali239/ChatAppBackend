@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/app.js';
 import { ConversationMember } from '../src/models/conversation-member.model.js';
 import { User } from '../src/models/user.model.js';
+import { AuthSession } from '../src/models/auth-session.model.js';
 import { createLogger } from '../src/utils/logger.js';
 
 const logger = createLogger('silent');
@@ -38,6 +39,11 @@ async function createAuthenticatedAgent(app = createTestApp()) {
     authTokenVersion: 0,
     isActive: () => true,
   };
+  vi.spyOn(AuthSession, 'create').mockResolvedValue({} as never);
+  vi.spyOn(AuthSession, 'findOne').mockReturnValue({
+    select: vi.fn().mockResolvedValue({ _id: new Types.ObjectId() }),
+  } as never);
+  vi.spyOn(AuthSession, 'updateOne').mockResolvedValue({} as never);
   vi.spyOn(User, 'findById').mockResolvedValue(user as never);
   const loginResponse = await request(app)
     .post('/api/v1/auth/mock-login')
@@ -141,6 +147,10 @@ describe('chat REST routes', () => {
       }),
     };
     vi.spyOn(User, 'findById').mockResolvedValue(user as never);
+    vi.spyOn(AuthSession, 'create').mockResolvedValue({} as never);
+    vi.spyOn(AuthSession, 'findOne').mockReturnValue({
+      select: vi.fn().mockResolvedValue({ _id: new Types.ObjectId() }),
+    } as never);
     const avatarName = 'avatar-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const ownerFolder = `chatapp/avatars/${createHash('sha256').update(userId.toString()).digest('hex')}`;
     const avatarPublicId = `${ownerFolder}/${avatarName}`;

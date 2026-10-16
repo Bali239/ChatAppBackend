@@ -3,6 +3,7 @@ import { Server as SocketServer } from 'socket.io';
 import { createCorsOptions, isTrustedOrigin } from '../config/cors.js';
 import { verifyAccessToken } from '../auth/tokens.js';
 import { User } from '../models/user.model.js';
+import { AuthSession } from '../models/auth-session.model.js';
 import { clearUserSendRateLimit, registerChatEvents } from './chat-events.js';
 import type {
   ChatSocket,
@@ -19,11 +20,24 @@ async function authenticateSocket(socket: ChatSocket, tokenSecret: string): Prom
   const token = socket.handshake.auth?.token;
   if (typeof token !== 'string') throw new Error('Authentication required');
   const claims = verifyAccessToken(token, tokenSecret);
+  const session = await AuthSession.findOne({
+    sessionId: claims.sessionId,
+    userId: claims.userId,
+    tokenVersion: claims.tokenVersion,
+    revokedAt: null,
+    expiresAt: { $gt: new Date() },
+  }).select('_id');
   const user = await User.findById(claims.userId);
-  if (!user || !user.isActive() || (user.authTokenVersion ?? 0) !== claims.tokenVersion) {
+  if (
+    !session ||
+    !user ||
+    !user.isActive() ||
+    (user.authTokenVersion ?? 0) !== claims.tokenVersion
+  ) {
     throw new Error('Authentication required');
   }
   socket.data.userId = user._id.toString();
+  socket.data.sessionId = claims.sessionId;
   socket.data.tokenVersion = claims.tokenVersion;
   socket.data.tokenExpiresAt = claims.expiresAt;
 }
@@ -58,6 +72,7 @@ export function attachSocketServer(
 
   io.on('connection', (socket) => {
     const userId = socket.data.userId;
+    void socket.join(`session:${socket.data.sessionId}`);
     void socket.join(`user:${userId}`);
     if (addUserConnection(userId, socket.id)) {
       io.emit('presence:update', { userId, isOnline: true });

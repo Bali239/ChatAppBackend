@@ -4,9 +4,9 @@ Run this plan against a **staging** deployment and database only. Authentication
 
 ## Setup
 
-Create a local Postman environment with `baseUrl` (staging backend origin, no trailing slash), `frontendUrl`, `accessToken`, `userAId`, `userBId`, optional `userCId`, `conversationId`, `messageId`, and `cursor`. Leave tokens out of shared environments and exported collections.
+Create a local Postman environment with `baseUrl` (staging backend origin, no trailing slash), `frontendUrl`, `accessToken`, `refreshToken`, `userAId`, `userBId`, optional `userCId`, `conversationId`, `messageId`, and `cursor`. Leave tokens out of shared environments and exported collections.
 
-Use Postman's local browser flow to sign in with a staging Google test account, or copy the access token from the OAuth completion response in the browser's local network tools. The frontend keeps the access token in memory; it expires after 15 minutes and a page reload requires a new sign-in. Set `Authorization: Bearer {{accessToken}}` on protected requests. Repeat sign-in for account B (and optionally C) when switching accounts.
+Use Postman's local browser flow to sign in with a staging Google test account, or copy both tokens from the OAuth completion fragment in browser developer tools. Access tokens expire after 15 minutes; the frontend stores a rotating refresh token in local storage and requests replacements from `/auth/refresh`. To refresh manually, send `POST {{baseUrl}}/api/v1/auth/refresh` with JSON `{"refreshToken":"{{refreshToken}}"}` and save both returned tokens. Set `Authorization: Bearer {{accessToken}}` on protected requests. Repeat sign-in for account B (and optionally C) when switching accounts.
 
 ## Common assertions
 
@@ -27,7 +27,7 @@ pm.test("has the API response envelope", () => {
 | --- | --- | --- |
 | 1 | `GET {{baseUrl}}/api/v1/health` | `200`, `data.ready: true`, MongoDB `connected` |
 | 2 | Clear `Authorization`; `GET {{baseUrl}}/api/v1/auth/me` | `401`, `AUTH_REQUIRED` |
-| 3 | Sign into staging as A with Google; obtain the in-memory bearer token | Browser returns to the configured frontend route; no auth cookie is set |
+| 3 | Sign into staging as A with Google; obtain the bearer token | Browser returns to the configured frontend route; no auth cookie is set |
 | 4 | `GET {{baseUrl}}/api/v1/auth/me` with `Authorization: Bearer {{accessToken}}` | `200`, expected account; save its ID as `userAId` |
 
 The Google redirect URI is `https://<staging-backend>/api/v1/auth/google/callback`. OAuth uses a short-lived signed state and returns the access token in the URL fragment; the frontend validates state and immediately removes the fragment from browser history.

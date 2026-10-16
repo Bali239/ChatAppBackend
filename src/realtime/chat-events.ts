@@ -8,6 +8,7 @@ import { Conversation } from '../models/conversation.model.js';
 import { ConversationMember } from '../models/conversation-member.model.js';
 import { Message } from '../models/message.model.js';
 import { User } from '../models/user.model.js';
+import { AuthSession } from '../models/auth-session.model.js';
 import { acknowledgeMessageDelivered, persistMessage } from '../services/message.service.js';
 import { markConversationRead } from '../services/message-history.service.js';
 import { AppError } from '../utils/error.js';
@@ -48,12 +49,16 @@ function toSocketError(error: unknown): SocketError {
 }
 
 async function assertSocketSession(socket: ChatSocket): Promise<void> {
-  if (socket.data.tokenExpiresAt <= Math.floor(Date.now() / 1000)) {
-    socket.disconnect(true);
-    throw new AppError(401, 'AUTH_REQUIRED', 'Authentication required');
-  }
   const user = await User.findById(socket.data.userId);
+  const session = await AuthSession.findOne({
+    sessionId: socket.data.sessionId,
+    userId: socket.data.userId,
+    tokenVersion: socket.data.tokenVersion,
+    revokedAt: null,
+    expiresAt: { $gt: new Date() },
+  }).select('_id');
   if (
+    !session ||
     !user ||
     !user.isActive() ||
     (user.authTokenVersion ?? 0) !== socket.data.tokenVersion

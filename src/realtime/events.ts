@@ -57,6 +57,7 @@ export interface InterServerEvents {}
 
 export interface SocketData {
   userId: string;
+  sessionId: string;
   tokenVersion: number;
   tokenExpiresAt: number;
   typingConversationIds: string[];

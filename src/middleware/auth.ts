@@ -2,6 +2,7 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { User } from '../models/user.model.js';
 import { AppError } from '../utils/error.js';
 import { verifyAccessToken } from '../auth/tokens.js';
+import { AuthSession } from '../models/auth-session.model.js';
 
 export type AuthenticatedUser = {
   id: string;
@@ -9,6 +10,7 @@ export type AuthenticatedUser = {
   displayName: string;
   avatarUrl?: string | null;
   accountStatus: 'active' | 'disabled';
+  sessionId: string;
 };
 
 declare global {
@@ -41,6 +43,17 @@ export function createRequireAuth(tokenSecret: string): RequestHandler {
     }
 
     try {
+      const session = await AuthSession.findOne({
+        sessionId: claims.sessionId,
+        userId: claims.userId,
+        tokenVersion: claims.tokenVersion,
+        revokedAt: null,
+        expiresAt: { $gt: new Date() },
+      }).select('_id');
+      if (!session) {
+        next(new AppError(401, 'AUTH_REQUIRED', 'Authentication required'));
+        return;
+      }
       const user = await User.findById(claims.userId);
       if (
         !user ||
@@ -57,6 +70,7 @@ export function createRequireAuth(tokenSecret: string): RequestHandler {
         displayName: user.displayName,
         avatarUrl: user.avatarUrl ?? null,
         accountStatus: user.accountStatus,
+        sessionId: claims.sessionId,
       };
       next();
     } catch (error) {

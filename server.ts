@@ -19,7 +19,7 @@ export async function startServer(
   environment: Environment,
   logger: AppLogger,
 ): Promise<ServerRuntime> {
-  let disconnectUserSockets: (userId: string) => void = () => undefined;
+  let disconnectSessionSockets: (sessionId: string) => void = () => undefined;
   const app = createApp({
     frontendOrigins: environment.FRONTEND_URL,
     environment: environment.NODE_ENV,
@@ -43,7 +43,7 @@ export async function startServer(
       googleCallbackUrl: environment.GOOGLE_CALLBACK_URL,
       postLoginRedirectUrl: environment.POST_LOGIN_REDIRECT_URL,
       redirectAllowlist: environment.AUTH_REDIRECT_ALLOWLIST,
-      onLogout: (userId) => disconnectUserSockets(userId),
+      onLogout: (sessionId) => disconnectSessionSockets(sessionId),
     },
   });
   const httpServer = createServer(app);
@@ -55,7 +55,7 @@ export async function startServer(
     logger,
     environment.AUTH_TOKEN_SECRET,
   );
-  disconnectUserSockets = (userId) => io.in(`user:${userId}`).disconnectSockets(true);
+  disconnectSessionSockets = (sessionId) => io.in(`session:${sessionId}`).disconnectSockets(true);
 
   try {
     await new Promise<void>((resolveListen, rejectListen) => {

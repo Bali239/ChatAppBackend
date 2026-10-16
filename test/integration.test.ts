@@ -7,6 +7,7 @@ import { Conversation } from '../src/models/conversation.model.js';
 import { ConversationMember } from '../src/models/conversation-member.model.js';
 import { Message } from '../src/models/message.model.js';
 import { User } from '../src/models/user.model.js';
+import { AuthSession } from '../src/models/auth-session.model.js';
 import type { MessageAcknowledgement } from '../src/realtime/events.js';
 import { attachSocketServer } from '../src/realtime/socket.js';
 import { createLogger } from '../src/utils/logger.js';
@@ -18,7 +19,9 @@ describe('local HTTP and Socket.IO integration', () => {
     const logger = createLogger('silent');
     const authenticatedUserId = new Types.ObjectId();
     let authTokenVersion = 0;
-    let disconnectUserSockets: (userId: string) => void = () => undefined;
+    let activeSessionId: string | undefined;
+    let sessionRevoked = false;
+    let disconnectSessionSockets: (sessionId: string) => void = () => undefined;
     const tokenSecret = 'test-only-auth-token-secret-at-least-32-chars';
     const app = createApp({
       frontendOrigins: [trustedOrigin],
@@ -27,15 +30,16 @@ describe('local HTTP and Socket.IO integration', () => {
       getDatabaseStatus: () => 'connected',
       authTokenSecret: tokenSecret,
       auth: {
-        onLogout: (userId) => {
+        onLogout: (sessionId) => {
           authTokenVersion += 1;
-          disconnectUserSockets(userId);
+          sessionRevoked = true;
+          disconnectSessionSockets(sessionId);
         },
       },
     });
     const httpServer = createServer(app);
     const socketServer = attachSocketServer(httpServer, [trustedOrigin], logger, tokenSecret);
-    disconnectUserSockets = (userId) => socketServer.in(`user:${userId}`).disconnectSockets(true);
+    disconnectSessionSockets = (sessionId) => socketServer.in(`session:${sessionId}`).disconnectSockets(true);
     let client: Socket | undefined;
     let authenticatedClient: Socket | undefined;
     let unavailableClient: Socket | undefined;
@@ -104,6 +108,16 @@ describe('local HTTP and Socket.IO integration', () => {
       });
       expect(client.connected).toBe(false);
 
+      vi.spyOn(AuthSession, 'create').mockImplementation(async (input) => {
+        activeSessionId = String((input as { sessionId?: string }).sessionId);
+        return {} as never;
+      });
+      vi.spyOn(AuthSession, 'findOne').mockReturnValue({
+        select: vi.fn().mockImplementation(async () => sessionRevoked
+          ? null
+          : { _id: new Types.ObjectId(), sessionId: activeSessionId }),
+      } as never);
+      vi.spyOn(AuthSession, 'updateOne').mockResolvedValue({} as never);
       vi.spyOn(User, 'findById').mockResolvedValue({
         _id: authenticatedUserId,
         accountStatus: 'active',
@@ -120,8 +134,11 @@ describe('local HTTP and Socket.IO integration', () => {
         body: JSON.stringify({ userId: authenticatedUserId.toString() }),
       });
       expect(loginResponse.status).toBe(200);
-      const loginBody = (await loginResponse.json()) as { data: { accessToken: string } };
+      const loginBody = (await loginResponse.json()) as {
+        data: { accessToken: string; sessionId: string };
+      };
       const accessToken = loginBody.data.accessToken;
+      activeSessionId = loginBody.data.sessionId;
       const currentUserResponse = await fetch(`${baseUrl}/api/v1/auth/me`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });

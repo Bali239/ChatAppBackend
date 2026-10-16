@@ -2,8 +2,9 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import { OAuth2Client } from 'google-auth-library';
 import { createRequireAuth } from '../middleware/auth.js';
-import { issueAccessToken, issueOAuthState, verifyOAuthState } from '../auth/tokens.js';
+import { issueOAuthState, verifyOAuthState } from '../auth/tokens.js';
 import { User } from '../models/user.model.js';
+import { createAuthSession, revokeAuthSession, rotateRefreshToken } from '../auth/refresh-sessions.js';
 import { AppError } from '../utils/error.js';
 import { sendSuccessResponse } from '../utils/response.js';
 
@@ -19,7 +20,7 @@ export interface AuthRouterOptions {
   googleCallbackUrl?: string;
   postLoginRedirectUrl?: string;
   redirectAllowlist?: readonly string[];
-  onLogout?: (userId: string) => void;
+  onLogout?: (sessionId: string, userId: string) => void;
   oauthClient?: GoogleOAuthClient;
 }
 
@@ -87,19 +88,48 @@ export function createAuthRouter(options: AuthRouterOptions): Router {
 
   router.post('/logout', requireAuth, async (request, response) => {
     const userId = request.user!.id;
-    await User.findByIdAndUpdate(userId, { $inc: { authTokenVersion: 1 } });
-    options.onLogout?.(userId);
+    const sessionId = request.user!.sessionId;
+    await revokeAuthSession(sessionId, userId);
+    options.onLogout?.(sessionId, userId);
     sendSuccessResponse(response, 200, 'Logged out', { loggedOut: true });
   });
 
-  router.post('/mock-login', (request, response) => {
+  router.post('/refresh', async (request, response) => {
+    const result = await rotateRefreshToken(request.body?.refreshToken, options.tokenSecret);
+    if (result.status === 'invalid') {
+      throw new AppError(401, 'AUTH_REQUIRED', 'Authentication required');
+    }
+    if (result.status === 'reused') {
+      options.onLogout?.(result.sessionId, result.userId);
+      throw new AppError(401, 'AUTH_REQUIRED', 'Authentication required');
+    }
+
+    const user = await User.findById(result.userId);
+    if (
+      !user ||
+      !user.isActive() ||
+      (user.authTokenVersion ?? 0) !== result.tokenVersion
+    ) {
+      await revokeAuthSession(result.tokens.sessionId, result.userId);
+      options.onLogout?.(result.tokens.sessionId, result.userId);
+      throw new AppError(401, 'AUTH_REQUIRED', 'Authentication required');
+    }
+    sendSuccessResponse(response, 200, 'Access token refreshed', {
+      accessToken: result.tokens.accessToken,
+      refreshToken: result.tokens.refreshToken,
+      accessTokenExpiresIn: result.tokens.accessTokenExpiresIn,
+      refreshTokenExpiresAt: result.tokens.refreshTokenExpiresAt,
+    });
+  });
+
+  router.post('/mock-login', async (request, response) => {
     if (request.app.get('env') !== 'test') {
       throw new AppError(404, 'NOT_FOUND', 'Route not found');
     }
     const { userId } = request.body as { userId?: string };
     if (!userId) throw new AppError(400, 'INVALID_REQUEST', 'userId is required');
-    const accessToken = issueAccessToken(userId, 0, options.tokenSecret);
-    sendSuccessResponse(response, 200, 'Mock login successful', { accessToken });
+    const tokens = await createAuthSession(userId, 0, options.tokenSecret);
+    sendSuccessResponse(response, 200, 'Mock login successful', tokens);
   });
 
   router.get('/google', async (request, response) => {
@@ -142,12 +172,12 @@ export function createAuthRouter(options: AuthRouterOptions): Router {
     } catch {
       throw new AppError(400, 'OAUTH_STATE_INVALID', 'Google sign-in could not be validated');
     }
-    const { tokens } = await client.getToken(code);
-    if (!tokens.id_token) {
+    const { tokens: googleTokens } = await client.getToken(code);
+    if (!googleTokens.id_token) {
       throw new AppError(401, 'OAUTH_TOKEN_INVALID', 'Google did not return a valid identity token');
     }
     const ticket = await client.verifyIdToken({
-      idToken: tokens.id_token,
+      idToken: googleTokens.id_token,
       audience: options.googleClientId,
     });
     const profile = ticket.getPayload();
@@ -173,14 +203,15 @@ export function createAuthRouter(options: AuthRouterOptions): Router {
       throw new AppError(403, 'ACCOUNT_DISABLED', 'This account is disabled');
     }
 
-    const accessToken = issueAccessToken(
+    const tokens = await createAuthSession(
       user._id.toString(),
       user.authTokenVersion ?? 0,
       options.tokenSecret,
     );
     const redirect = new URL(resolveRedirect(oauthState.returnTo));
     redirect.hash = new URLSearchParams({
-      access_token: accessToken,
+      access_token: tokens.accessToken,
+      refresh_token: tokens.refreshToken,
       state: oauthState.clientState,
     }).toString();
     response.setHeader('Cache-Control', 'no-store');
