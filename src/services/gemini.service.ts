@@ -1,5 +1,5 @@
 import type { Content } from '@google/genai';
-import { GEMINI_GENERATION_CONFIG, GEMINI_MODEL, getGeminiClient } from '../config/gemini.js';
+import { GEMINI_GENERATION_CONFIG, generateGeminiContent } from '../config/gemini.js';
 import { ConversationMember } from '../models/conversation-member.model.js';
 import { Message } from '../models/message.model.js';
 import { Types } from 'mongoose';
@@ -86,8 +86,7 @@ export async function generateConversationReply(input: {
   console.log('Sending contents to Gemini:', JSON.stringify(contents, null, 2));
 
   try {
-    const response = await getGeminiClient(input.apiKey).models.generateContent({
-      model: GEMINI_MODEL,
+    const response = await generateGeminiContent(input.apiKey, {
       contents,
       config: {
         ...GEMINI_GENERATION_CONFIG,

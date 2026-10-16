@@ -123,12 +123,18 @@ async function generateAndBroadcastAiReply(input: {
       code,
       status: typeof status === 'number' || typeof status === 'string' ? status : undefined,
     }, 'AI reply processing failed');
+    const failureCode = failureStage === 'generation'
+      ? 'AI_GENERATION_FAILED'
+      : 'AI_REPLY_PERSISTENCE_FAILED';
+    const failureMessage = failureStage === 'generation'
+      ? 'Gemini could not respond. Please try again shortly.'
+      : 'Gemini replied, but the reply could not be saved. Please refresh and try again.';
     input.io.to(userRoom(input.userId)).emit('ai:error', {
       conversationId: input.conversationId,
       requestMessageId: input.requestMessageId,
-      message: 'Gemini could not respond. Please try again shortly.',
+      message: failureMessage,
     });
-    throw new AppError(502, 'AI_GENERATION_FAILED', 'Gemini could not respond. Please try again shortly.');
+    throw new AppError(502, failureCode, failureMessage);
   } finally {
     emitAiStatus(input.io, input.participantIds, input.conversationId, input.requestMessageId, false);
   }
