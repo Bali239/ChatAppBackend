@@ -120,6 +120,7 @@ async function generateAndBroadcastAiReply(input: {
   participantIds: string[];
 }): Promise<void> {
   emitAiStatus(input.io, input.participantIds, input.conversationId, input.requestMessageId, true);
+  let failureStage: 'generation' | 'persistence' = 'generation';
   try {
     const content = await generateConversationReply({
       apiKey: input.apiKey,
@@ -127,6 +128,7 @@ async function generateAndBroadcastAiReply(input: {
       conversationId: input.conversationId,
       requestMessageId: input.requestMessageId,
     });
+    failureStage = 'persistence';
     const result = await persistAssistantMessage({
       userId: input.userId,
       conversationId: input.conversationId,
@@ -137,10 +139,21 @@ async function generateAndBroadcastAiReply(input: {
       input.io.to(userRoom(participantId)).emit('message:new', result.message);
     }
   } catch (error) {
+    const providerError = typeof error === 'object' && error !== null
+      ? error as { status?: unknown; statusCode?: unknown; code?: unknown }
+      : undefined;
+    const status = providerError?.status ?? providerError?.statusCode;
+    const code = error instanceof AppError
+      ? error.code
+      : typeof providerError?.code === 'string' || typeof providerError?.code === 'number'
+        ? providerError.code
+        : undefined;
     input.logger.warn({
+      stage: failureStage,
       errorType: error instanceof Error ? error.name : 'UnknownError',
-      code: error instanceof AppError ? error.code : undefined,
-    }, 'Gemini response generation failed');
+      code,
+      status: typeof status === 'number' || typeof status === 'string' ? status : undefined,
+    }, 'AI reply processing failed');
     input.io.to(userRoom(input.userId)).emit('ai:error', {
       conversationId: input.conversationId,
       requestMessageId: input.requestMessageId,
