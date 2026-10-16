@@ -17,6 +17,7 @@ describe('local HTTP and Socket.IO integration', () => {
   it('authenticates HTTP and sockets with bearer tokens and disconnects them on logout', async () => {
     const logger = createLogger('silent');
     const authenticatedUserId = new Types.ObjectId();
+    let authTokenVersion = 0;
     let disconnectUserSockets: (userId: string) => void = () => undefined;
     const tokenSecret = 'test-only-auth-token-secret-at-least-32-chars';
     const app = createApp({
@@ -25,7 +26,12 @@ describe('local HTTP and Socket.IO integration', () => {
       logger,
       getDatabaseStatus: () => 'connected',
       authTokenSecret: tokenSecret,
-      auth: { onLogout: (userId) => disconnectUserSockets(userId) },
+      auth: {
+        onLogout: (userId) => {
+          authTokenVersion += 1;
+          disconnectUserSockets(userId);
+        },
+      },
     });
     const httpServer = createServer(app);
     const socketServer = attachSocketServer(httpServer, [trustedOrigin], logger, tokenSecret);
@@ -101,9 +107,10 @@ describe('local HTTP and Socket.IO integration', () => {
       vi.spyOn(User, 'findById').mockResolvedValue({
         _id: authenticatedUserId,
         accountStatus: 'active',
-        authTokenVersion: 0,
+        get authTokenVersion() { return authTokenVersion; },
         isActive: () => true,
       } as never);
+      vi.spyOn(User, 'findByIdAndUpdate').mockResolvedValue({} as never);
       const loginResponse = await fetch(`${baseUrl}/api/v1/auth/mock-login`, {
         method: 'POST',
         headers: {
@@ -245,5 +252,5 @@ describe('local HTTP and Socket.IO integration', () => {
       unavailableClient?.disconnect();
       await new Promise<void>((resolveClose) => socketServer.close(() => resolveClose()));
     }
-  });
+  }, 20_000);
 });

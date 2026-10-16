@@ -27,6 +27,7 @@ The public Next.js variables are embedded at build time. Changing them in Vercel
 2. Start the backend from the server repository with `npm ci && npm run dev`. The checked-in example sets `PORT=5000`; if you choose another port, use the same port in both client URLs.
 3. Copy `client/.env.example` to `client/.env.local`, set `NEXT_PUBLIC_API_URL` to `http://localhost:<PORT>/api/v1` and `NEXT_PUBLIC_SOCKET_URL` to `http://localhost:<PORT>`, then run `npm ci && npm run dev` in the client repository.
 4. Check `http://localhost:<PORT>/api/v1/health`. It returns `200` only when MongoDB is connected and `503` otherwise.
+5. For local Google login, add `http://localhost:3000` as an Authorized JavaScript origin and `http://localhost:5000/api/v1/auth/google/callback` as an Authorized redirect URI on the Google OAuth Web client. Keep the matching local values in `server/.env`; the Vercel/Render production redirect is a separate URI.
 
 ## Vercel Client
 

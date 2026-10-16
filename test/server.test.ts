@@ -9,6 +9,7 @@ describe('HTTP server lifecycle', () => {
       ...parseEnvironment({
         MONGODB_URI: 'mongodb://127.0.0.1:27017/chat_app',
         FRONTEND_URL: 'http://localhost:3000',
+        AUTH_TOKEN_SECRET: 'test-only-auth-token-secret-at-least-32-chars',
       }),
       PORT: 0,
     };
