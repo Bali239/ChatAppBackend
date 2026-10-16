@@ -57,6 +57,8 @@ export async function getVisibleMessageHistory(input: {
       id: message._id.toString(),
       conversationId: message.conversationId.toString(),
       senderId: message.senderId.toString(),
+      senderType: message.senderType === 'assistant' ? 'assistant' : 'user',
+      replyToMessageId: message.replyToMessageId?.toString() ?? null,
       senderSnapshot: message.senderSnapshot,
       content: message.content,
       clientMessageId: message.clientMessageId,

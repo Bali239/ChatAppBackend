@@ -10,6 +10,8 @@ export interface PersistedMessage {
   id: string;
   conversationId: string;
   senderId: string;
+  senderType?: 'user' | 'assistant';
+  replyToMessageId?: string | null;
   senderSnapshot: {
     displayName: string;
     avatarUrl: string | null;
@@ -39,6 +41,8 @@ export interface ClientToServerEvents {
 }
 
 export interface ServerToClientEvents {
+  'ai:status': (update: { conversationId: string; requestMessageId: string; active: boolean }) => void;
+  'ai:error': (update: { conversationId: string; requestMessageId: string; message: string }) => void;
   'profile:updated': (profile: { id: string; displayName: string; avatarUrl: string | null }) => void;
   'message:new': (message: PersistedMessage) => void;
   'message:ack': (result: MessageAcknowledgement) => void;

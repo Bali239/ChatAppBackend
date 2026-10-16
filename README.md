@@ -15,7 +15,7 @@ The health endpoint is `GET http://localhost:<PORT>/health` (also available at `
 
 ## Environment
 
-`MONGODB_URI`, `FRONTEND_URL`, and `AUTH_TOKEN_SECRET` are required. `FRONTEND_URL` accepts one or more comma-separated exact HTTP(S) origins. Production requires HTTPS origins and the Cloudinary values below. `AUTH_TOKEN_SECRET` must be a private random value of at least 32 characters and must match across HTTP and Socket.IO. `PORT` is supplied by Render in deployment; locally it is read from `.env` (schema fallback `4000`). `.env.example` contains local development placeholders. Do not commit `.env` or put production secrets in source control.
+`MONGODB_URI`, `FRONTEND_URL`, and `AUTH_TOKEN_SECRET` are required. `FRONTEND_URL` accepts one or more comma-separated exact HTTP(S) origins. Production requires HTTPS origins and the Cloudinary values below. `AUTH_TOKEN_SECRET` must be a private random value of at least 32 characters and must match across HTTP and Socket.IO. `GEMINI_API_KEY` is optional and enables `@ai` replies; keep it server-side and out of source control. `PORT` is supplied by Render in deployment; locally it is read from `.env` (schema fallback `4000`). `.env.example` contains local development placeholders. Do not commit `.env` or put production secrets in source control.
 
 Avatar uploads require `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, and `CLOUDINARY_AVATAR_UPLOAD_PRESET`. Keep the API secret server-side. Configure the named Cloudinary preset as **signed**, restrict formats to JPG/PNG/WebP, and set its maximum file size to 5 MB. The server signs a unique public ID and per-user hashed folder, then verifies the uploaded image through Cloudinary before saving it to the profile.
 

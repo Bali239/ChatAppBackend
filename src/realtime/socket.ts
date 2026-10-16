@@ -47,6 +47,7 @@ export function attachSocketServer(
   frontendOrigins: readonly string[],
   logger: AppLogger,
   tokenSecret: string,
+  geminiApiKey?: string,
 ): ChatSocketServer {
   const io = new SocketServer<
     ClientToServerEvents,
@@ -77,7 +78,7 @@ export function attachSocketServer(
     if (addUserConnection(userId, socket.id)) {
       io.emit('presence:update', { userId, isOnline: true });
     }
-    registerChatEvents(io, socket, logger);
+    registerChatEvents(io, socket, logger, geminiApiKey);
     logger.info('Socket connected');
     socket.on('disconnect', () => {
       if (removeUserConnection(userId, socket.id)) {

@@ -47,6 +47,7 @@ export const environmentSchema = z
     PORT: z.coerce.number().int().min(1).max(65_535).default(4_000),
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     MONGODB_URI: z.string().min(1).regex(/^mongodb(?:\+srv)?:\/\//),
+    GEMINI_API_KEY: z.string().min(1).optional(),
     FRONTEND_URL: frontendOriginsSchema,
     AUTH_TOKEN_SECRET: z.string().min(32),
     GOOGLE_CLIENT_ID: z.string().min(1).optional(),

@@ -31,6 +31,17 @@ const messageSchema = new Schema(
       ref: 'User',
       required: true,
     },
+    senderType: {
+      type: String,
+      enum: ['user', 'assistant'],
+      default: 'user',
+      required: true,
+    },
+    replyToMessageId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Message',
+      default: null,
+    },
     senderSnapshot: {
       type: senderSnapshotSchema,
       required: true,
@@ -60,6 +71,14 @@ messageSchema.index(
 messageSchema.index(
   { conversationId: 1, senderId: 1, clientMessageId: 1 },
   { unique: true, name: 'unique_sender_message_retry' },
+);
+messageSchema.index(
+  { conversationId: 1, replyToMessageId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { replyToMessageId: { $type: 'objectId' } },
+    name: 'unique_ai_reply_per_prompt',
+  },
 );
 
 export type MessageDocument = InferSchemaType<typeof messageSchema> & {

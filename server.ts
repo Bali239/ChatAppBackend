@@ -54,6 +54,7 @@ export async function startServer(
     environment.FRONTEND_URL,
     logger,
     environment.AUTH_TOKEN_SECRET,
+    environment.GEMINI_API_KEY,
   );
   app.set('io', io);
   disconnectSessionSockets = (sessionId) => io.in(`session:${sessionId}`).disconnectSockets(true);

@@ -14,7 +14,7 @@ interface PreviewAggregateRow {
   _id: Types.ObjectId;
   message: Pick<
     MessageDocument,
-    '_id' | 'conversationId' | 'senderId' | 'senderSnapshot' | 'content' | 'createdAt'
+    '_id' | 'conversationId' | 'senderId' | 'senderType' | 'senderSnapshot' | 'content' | 'createdAt'
   >;
 }
 
@@ -144,6 +144,7 @@ export async function listConversationsForUser(input: {
       lastMessage: preview ? {
         id: preview._id.toString(),
         senderId: preview.senderId.toString(),
+        senderType: preview.senderType === 'assistant' ? 'assistant' : 'user',
         senderSnapshot: preview.senderSnapshot,
         content: preview.content,
         createdAt: preview.createdAt,

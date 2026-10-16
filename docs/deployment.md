@@ -9,6 +9,7 @@ This workspace contains two independent Git repositories. Deploy the client and 
 | `NEXT_PUBLIC_API_URL` | Vercel client build | `http://localhost:5000/api/v1` (match server `PORT`) | Staging backend URL ending in `/api/v1` | Production Render URL ending in `/api/v1` |
 | `NEXT_PUBLIC_SOCKET_URL` | Vercel client build | Backend origin, e.g. `http://localhost:5000` | Staging backend origin | Production Render origin |
 | `MONGODB_URI` | Server runtime | Local MongoDB or development Atlas database | Staging Render secret | Production Render secret |
+| `GEMINI_API_KEY` | Server runtime secret | Optional for `@ai` replies | Optional staging secret | Optional production secret |
 | `FRONTEND_URL` | Server runtime | Exact `http://localhost:3000` origin | Exact stable Preview origin(s), on staging only | Exact production Vercel origin(s) |
 | `AUTH_TOKEN_SECRET` | Server runtime secret | Private random value, at least 32 characters | Separate staging secret | Private production secret, at least 32 characters |
 | `CLOUDINARY_CLOUD_NAME` | Server runtime | Optional while avatar uploads are disabled | Staging Cloudinary account | Production Cloudinary account |

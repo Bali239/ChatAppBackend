@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Types } from 'mongoose';
 import { Conversation } from '../models/conversation.model.js';
 import { ConversationMember } from '../models/conversation-member.model.js';
@@ -24,6 +25,8 @@ function toPersistedMessage(message: {
   _id: Types.ObjectId;
   conversationId: Types.ObjectId;
   senderId: Types.ObjectId;
+  senderType?: 'user' | 'assistant';
+  replyToMessageId?: Types.ObjectId | null;
   senderSnapshot: { displayName: string; avatarUrl?: string | null };
   content: string;
   clientMessageId: string;
@@ -33,6 +36,8 @@ function toPersistedMessage(message: {
     id: message._id.toString(),
     conversationId: message.conversationId.toString(),
     senderId: message.senderId.toString(),
+    senderType: message.senderType === 'assistant' ? 'assistant' : 'user',
+    replyToMessageId: message.replyToMessageId?.toString() ?? null,
     senderSnapshot: {
       displayName: message.senderSnapshot.displayName,
       avatarUrl: message.senderSnapshot.avatarUrl ?? null,
@@ -125,6 +130,7 @@ export async function persistMessage(input: {
     message = await Message.create({
       conversationId,
       senderId,
+      senderType: 'user',
       senderSnapshot: {
         displayName: sender.displayName,
         avatarUrl: sender.avatarUrl ?? null,
@@ -146,6 +152,61 @@ export async function persistMessage(input: {
     message: toPersistedMessage(message),
     participantIds: conversation.participantIds.map((participantId) => participantId.toString()),
     duplicate,
+  };
+}
+
+export async function persistAssistantMessage(input: {
+  userId: string;
+  conversationId: string;
+  replyToMessageId: string;
+  content: string;
+}) {
+  const senderId = parseObjectId(input.userId, 'INVALID_USER_ID');
+  const conversationId = parseObjectId(input.conversationId, 'INVALID_CONVERSATION_ID');
+  const replyToMessageId = parseObjectId(input.replyToMessageId, 'INVALID_MESSAGE_ID');
+  const content = input.content.trim().slice(0, MAX_MESSAGE_LENGTH);
+  if (!content) throw new AppError(502, 'AI_EMPTY_RESPONSE', 'Gemini returned an empty response');
+
+  const membership = await ConversationMember.findOne({ conversationId, userId: senderId })
+    .select('_id')
+    .lean();
+  const conversation = await Conversation.findById(conversationId)
+    .select('participantIds')
+    .lean();
+  if (!membership || !conversation || !conversation.participantIds.some((id) => id.equals(senderId))) {
+    throw new AppError(403, 'CONVERSATION_FORBIDDEN', 'You cannot send to this conversation');
+  }
+
+  const idempotencyFilter = { conversationId, replyToMessageId };
+  const existing = await Message.findOne(idempotencyFilter).lean();
+  if (existing) {
+    return {
+      message: toPersistedMessage(existing),
+      participantIds: conversation.participantIds.map((id) => id.toString()),
+    };
+  }
+
+  let message;
+  try {
+    message = await Message.create({
+      conversationId,
+      senderId,
+      senderType: 'assistant',
+      replyToMessageId,
+      senderSnapshot: { displayName: 'Gemini AI', avatarUrl: null },
+      content,
+      clientMessageId: `gemini_${randomUUID().replaceAll('-', '')}`,
+    });
+  } catch (error) {
+    if (getErrorCode(error) !== 11000) throw error;
+    message = await Message.findOne(idempotencyFilter).lean();
+    if (!message) throw error;
+  }
+
+  await updateConversationActivity(message);
+  return {
+    message: toPersistedMessage(message),
+    participantIds: conversation.participantIds.map((id) => id.toString()),
   };
 }
 
