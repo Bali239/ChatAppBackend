@@ -2,7 +2,6 @@ services:
   - type: web
     name: chatapp-server
     runtime: node
-    rootDir: server
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /api/v1/health

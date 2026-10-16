@@ -39,7 +39,7 @@ Configure `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_SOCKET_URL` separately in Verce
 
 The server is its own repository; use that repository root as the Render service root. [`render.yaml`](../render.yaml) defines a Node Web Service with:
 
-- Build: `npm ci && npm run build`
+- Build: `npm ci --include=dev && npm run build`
 - Start: `npm start` (runs the compiled `dist/server.js`)
 - Health check: `/api/v1/health`
 - Automatic deploys disabled so deployment remains an explicit release action
