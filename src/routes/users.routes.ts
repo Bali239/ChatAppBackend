@@ -107,6 +107,12 @@ export function createUsersRouter(options: {
         credentials: options.cloudinary,
         logger: options.logger,
       });
+      const io = request.app.get('io') as import('../realtime/events.js').ChatSocketServer | undefined;
+      io?.emit('profile:updated', {
+        id: user.id,
+        displayName: user.displayName,
+        avatarUrl: user.avatarUrl ?? null,
+      });
       sendSuccessResponse(response, 200, 'Profile updated', { user });
     },
   );

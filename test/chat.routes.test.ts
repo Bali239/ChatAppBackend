@@ -163,6 +163,8 @@ describe('chat REST routes', () => {
       bytes: 100,
     } as never);
     const app = createTestApp();
+    const emit = vi.fn();
+    app.set('io', { emit });
     const loginResponse = await request(app)
       .post('/api/v1/auth/mock-login')
       .send({ userId: userId.toString() })
@@ -179,6 +181,43 @@ describe('chat REST routes', () => {
     expect(user.avatarPublicId).toBe(avatarPublicId);
     expect(user.save).toHaveBeenCalledOnce();
     expect(response.body.data.user.email).toBe('current@example.com');
+    expect(emit).toHaveBeenCalledWith('profile:updated', {
+      id: userId.toString(),
+      displayName: 'Updated Name',
+      avatarUrl: 'https://res.cloudinary.com/test/image/upload/avatar.png',
+    });
+  });
+
+  it('does not broadcast a profile update when saving fails', async () => {
+    const user = {
+      _id: userId,
+      email: 'current@example.com',
+      displayName: 'Current User',
+      avatarUrl: null,
+      accountStatus: 'active',
+      isActive: () => true,
+      save: vi.fn().mockRejectedValue(new Error('database unavailable')),
+    };
+    vi.spyOn(User, 'findById').mockResolvedValue(user as never);
+    vi.spyOn(AuthSession, 'create').mockResolvedValue({} as never);
+    vi.spyOn(AuthSession, 'findOne').mockReturnValue({
+      select: vi.fn().mockResolvedValue({ _id: new Types.ObjectId() }),
+    } as never);
+    const app = createTestApp();
+    const emit = vi.fn();
+    app.set('io', { emit });
+    const login = await request(app)
+      .post('/api/v1/auth/mock-login')
+      .send({ userId: userId.toString() })
+      .expect(200);
+
+    await request(app)
+      .patch('/api/v1/users/me/profile')
+      .set('Authorization', `Bearer ${login.body.data.accessToken as string}`)
+      .send({ displayName: 'Updated Name' })
+      .expect(500);
+
+    expect(emit).not.toHaveBeenCalled();
   });
 
   it('does not allow a guessed conversation ID to read history without membership', async () => {

@@ -3,7 +3,7 @@ import { connectDatabase } from '../src/config/database.js';
 import { createLogger } from '../src/utils/logger.js';
 
 describe('MongoDB connection handling', () => {
-  it('reports connection failures without logging the raw error or URI', async () => {
+  it('reports a sanitized connection reason without logging credentials or the raw URI', async () => {
     const logger = createLogger('silent');
     const connectionError = new Error('failed to connect to mongodb://user:password@host/private');
     const connectSpy = vi.spyOn(mongoose, 'connect').mockRejectedValueOnce(connectionError);
@@ -14,7 +14,10 @@ describe('MongoDB connection handling', () => {
       'MongoDB connection failed',
     );
     expect(errorSpy).toHaveBeenCalledWith(
-      { errorType: 'Error' },
+      {
+        errorType: 'Error',
+        errorMessage: 'failed to connect to MongoDB URI [redacted]',
+      },
       'MongoDB connection failed',
     );
     expect(errorSpy).not.toHaveBeenCalledWith(connectionError);

@@ -39,6 +39,7 @@ export interface ClientToServerEvents {
 }
 
 export interface ServerToClientEvents {
+  'profile:updated': (profile: { id: string; displayName: string; avatarUrl: string | null }) => void;
   'message:new': (message: PersistedMessage) => void;
   'message:ack': (result: MessageAcknowledgement) => void;
   'message:delivered': (receipt: {

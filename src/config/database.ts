@@ -16,6 +16,32 @@ export function getDatabaseStatus(): DatabaseStatus {
   }
 }
 
+function getSafeConnectionError(error: unknown): Record<string, string | number> {
+  if (!error || typeof error !== 'object') return { errorType: 'UnknownError' };
+
+  const source = error as {
+    name?: unknown;
+    message?: unknown;
+    code?: unknown;
+    syscall?: unknown;
+    hostname?: unknown;
+    address?: unknown;
+    port?: unknown;
+  };
+  const details: Record<string, string | number> = {
+    errorType: typeof source.name === 'string' ? source.name : 'UnknownError',
+  };
+  if (typeof source.message === 'string') {
+    details.errorMessage = source.message.replace(/mongodb(?:\+srv)?:\/\/[^\s"'<>]+/gi, 'MongoDB URI [redacted]');
+  }
+  if (typeof source.code === 'string' || typeof source.code === 'number') details.errorCode = source.code;
+  if (typeof source.syscall === 'string') details.syscall = source.syscall;
+  if (typeof source.hostname === 'string') details.hostname = source.hostname;
+  if (typeof source.address === 'string') details.address = source.address;
+  if (typeof source.port === 'number') details.port = source.port;
+  return details;
+}
+
 export async function connectDatabase(uri: string, logger: AppLogger): Promise<void> {
   try {
     await mongoose.connect(uri);
@@ -23,7 +49,7 @@ export async function connectDatabase(uri: string, logger: AppLogger): Promise<v
   } catch (error) {
     await mongoose.disconnect().catch(() => undefined);
     logger.error(
-      { errorType: error instanceof Error ? error.name : 'UnknownError' },
+      getSafeConnectionError(error),
       'MongoDB connection failed',
     );
     throw new Error('MongoDB connection failed');

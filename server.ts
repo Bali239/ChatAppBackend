@@ -55,6 +55,7 @@ export async function startServer(
     logger,
     environment.AUTH_TOKEN_SECRET,
   );
+  app.set('io', io);
   disconnectSessionSockets = (sessionId) => io.in(`session:${sessionId}`).disconnectSockets(true);
 
   try {
