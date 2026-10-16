@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildSessionPayload } from '../src/config/session.js';
 import { normalizeDisplayName, User } from '../src/models/user.model.js';
 
 describe('Google identity and session payloads', () => {
@@ -63,19 +62,4 @@ describe('Google identity and session payloads', () => {
     expect(updatedUser.avatarUrl).toBe('https://example.com/app-avatar.png');
   });
 
-  it('builds a server-side session payload with authenticated user metadata', () => {
-    const createdAt = new Date('2026-01-01T00:00:00.000Z');
-    const payload = buildSessionPayload({
-      userId: 'user-123',
-      createdAt,
-      idleMs: 7 * 24 * 60 * 60 * 1000,
-      absoluteMs: 30 * 24 * 60 * 60 * 1000,
-    });
-
-    expect(payload.userId).toBe('user-123');
-    expect(payload.isAuthenticated).toBe(true);
-    expect(payload.createdAt.toISOString()).toBe(createdAt.toISOString());
-    expect(payload.expiresAt.getTime()).toBeGreaterThan(payload.createdAt.getTime());
-    expect(payload.lastActivityAt.getTime()).toBeGreaterThanOrEqual(payload.createdAt.getTime());
-  });
 });

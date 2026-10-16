@@ -15,9 +15,9 @@ export function createCorsOptions(origins: readonly string[]): CorsOptions {
 
       callback(new AppError(403, 'ORIGIN_NOT_ALLOWED', 'Origin is not allowed'));
     },
-    credentials: true,
+    credentials: false,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'X-CSRF-Token'],
+    allowedHeaders: ['Authorization', 'Content-Type'],
     maxAge: 600,
   };
 }

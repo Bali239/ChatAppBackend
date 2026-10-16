@@ -1,12 +1,10 @@
 import compression from 'compression';
-import cookieParser from 'cookie-parser';
 import cors from 'cors';
-import express, { type Express, type RequestHandler } from 'express';
+import express, { type Express } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import helmet from 'helmet';
 import type { DatabaseStatus } from './config/database.js';
 import { createCorsOptions } from './config/cors.js';
-import { createSessionMiddleware } from './config/session.js';
 import { createErrorHandler } from './middleware/error-handler.js';
 import { notFoundHandler } from './middleware/not-found.js';
 import { createAuthRouter, type AuthRouterOptions } from './routes/auth.routes.js';
@@ -23,9 +21,7 @@ export interface AppOptions {
   environment: Environment['NODE_ENV'];
   logger: AppLogger;
   getDatabaseStatus: () => DatabaseStatus;
-  sessionSecret?: string;
-  sessionCookieName?: string;
-  sessionMiddleware?: RequestHandler;
+  authTokenSecret?: string;
   mongoUri?: string;
   cloudinary?: {
     cloudName: string;
@@ -33,13 +29,17 @@ export interface AppOptions {
     apiSecret: string;
     avatarUploadPreset: string;
   };
-  auth?: AuthRouterOptions;
+  auth?: Omit<AuthRouterOptions, 'tokenSecret'>;
 }
 
 export function createApp(options: AppOptions): Express {
+  const tokenSecret = options.authTokenSecret ?? (
+    options.environment === 'test' ? 'test-only-auth-token-secret-at-least-32-chars' : undefined
+  );
+  if (!tokenSecret) throw new Error('AUTH_TOKEN_SECRET is required');
+
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', 1);
   app.set('env', options.environment);
   app.use(
     helmet({
@@ -51,17 +51,6 @@ export function createApp(options: AppOptions): Express {
   app.use(compression());
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: false }));
-  app.use(cookieParser());
-  const sessionMiddleware = options.sessionMiddleware ?? createSessionMiddleware({
-    secret: options.sessionSecret ?? 'development-session-secret-change-me',
-    cookieName: options.sessionCookieName ?? '__Host-chat_session',
-    mongoUri: options.mongoUri,
-    secure: options.environment === 'production',
-    sameSite: options.environment === 'production' ? 'none' : 'lax',
-    maxAge: options.auth?.sessionIdleTimeoutMs ?? 7 * 24 * 60 * 60 * 1000,
-    isProduction: options.environment === 'production',
-  });
-  app.use(sessionMiddleware);
   app.use(createHttpLogger(options.logger));
 
   const api = express.Router();
@@ -78,11 +67,15 @@ export function createApp(options: AppOptions): Express {
   api.use(createHealthRouter(options.getDatabaseStatus));
   api.use('/auth', createAuthRouter({
     ...options.auth,
-    cookieName: options.sessionCookieName,
+    tokenSecret,
   }));
-  api.use('/users', createUsersRouter({ cloudinary: options.cloudinary, logger: options.logger }));
-  api.use('/conversations', createConversationsRouter());
-  api.use('/uploads', createUploadsRouter({ cloudinary: options.cloudinary }));
+  api.use('/users', createUsersRouter({
+    tokenSecret,
+    cloudinary: options.cloudinary,
+    logger: options.logger,
+  }));
+  api.use('/conversations', createConversationsRouter(tokenSecret));
+  api.use('/uploads', createUploadsRouter({ tokenSecret, cloudinary: options.cloudinary }));
   app.use(createHealthRouter(options.getDatabaseStatus));
   app.use('/api/v1', api);
 

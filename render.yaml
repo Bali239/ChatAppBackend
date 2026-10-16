@@ -11,11 +11,9 @@ services:
         value: production
       - key: MONGODB_URI
         sync: false
+      - key: AUTH_TOKEN_SECRET
+        sync: false
       - key: FRONTEND_URL
         value: https://chatapp-ten-blush.vercel.app
-      - key: COOKIE_SECURE
-        value: "true"
-      - key: COOKIE_SAME_SITE
-        value: none
       - key: LOG_LEVEL
         value: info

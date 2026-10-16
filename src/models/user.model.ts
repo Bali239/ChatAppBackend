@@ -62,6 +62,11 @@ const userSchema = new Schema(
       enum: USER_ACCOUNT_STATUSES,
       default: 'active',
     },
+    authTokenVersion: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     lastLoginAt: {
       type: Date,
       default: null,

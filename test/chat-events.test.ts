@@ -17,13 +17,9 @@ function createSocketHarness(isMember: boolean) {
   const serverEmits: Array<[string, unknown]> = [];
   const socket = {
     id: new Types.ObjectId().toString(),
-    data: { userId: new Types.ObjectId().toString(), typingConversationIds: [] as string[] },
-    request: {
-      session: {
-        userId: 'user-session',
-        expiresAt: new Date(Date.now() + 60_000),
-        idleExpiresAt: new Date(Date.now() + 60_000),
-      },
+    data: {
+      userId: new Types.ObjectId().toString(), tokenVersion: 0,
+      tokenExpiresAt: Date.now() + 60_000, typingConversationIds: [] as string[],
     },
     on: (event: string, handler: (...args: never[]) => void) => handlers.set(event, handler),
     emit: (event: string, payload: unknown) => socketEmits.push([event, payload]),
@@ -35,7 +31,7 @@ function createSocketHarness(isMember: boolean) {
     to: vi.fn(() => ({ emit: (event: string, payload: unknown) => serverEmits.push([event, payload]) })),
   };
 
-  vi.spyOn(User, 'findById').mockResolvedValue({ isActive: () => true } as never);
+  vi.spyOn(User, 'findById').mockResolvedValue({ isActive: () => true, authTokenVersion: 0 } as never);
   vi.spyOn(ConversationMember, 'findOne').mockReturnValue({
     select: vi.fn().mockReturnThis(),
     lean: vi.fn().mockResolvedValue(isMember ? { _id: new Types.ObjectId() } : null),

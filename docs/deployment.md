@@ -10,17 +10,16 @@ This workspace contains two independent Git repositories. Deploy the client and 
 | `NEXT_PUBLIC_SOCKET_URL` | Vercel client build | Backend origin, e.g. `http://localhost:5000` | Staging backend origin | Production Render origin |
 | `MONGODB_URI` | Server runtime | Local MongoDB or development Atlas database | Staging Render secret | Production Render secret |
 | `FRONTEND_URL` | Server runtime | Exact `http://localhost:3000` origin | Exact stable Preview origin(s), on staging only | Exact production Vercel origin(s) |
+| `AUTH_TOKEN_SECRET` | Server runtime secret | Private random value, at least 32 characters | Separate staging secret | Private production secret, at least 32 characters |
 | `CLOUDINARY_CLOUD_NAME` | Server runtime | Optional while avatar uploads are disabled | Staging Cloudinary account | Production Cloudinary account |
 | `CLOUDINARY_API_KEY` | Server runtime secret | Optional while avatar uploads are disabled | Staging secret | Production secret |
 | `CLOUDINARY_API_SECRET` | Server runtime secret | Optional while avatar uploads are disabled | Staging secret | Production secret |
 | `CLOUDINARY_AVATAR_UPLOAD_PRESET` | Server runtime | Optional while avatar uploads are disabled | Signed staging preset | Signed production preset |
 | `PORT` | Render runtime / local server | `.env` value; example is `5000` | Render-assigned | Render-assigned |
 | `NODE_ENV` | Server runtime | `development` | `production` on Render | `production` |
-| `COOKIE_SECURE` | Server runtime | `false` for local HTTP | `true` | `true` |
-| `COOKIE_SAME_SITE` | Server runtime | `lax` | Set for the chosen staging topology | `none` for cross-site Vercel/Render cookies; requires `COOKIE_SECURE=true` |
 | `LOG_LEVEL` | Server runtime | `info` | `info` | `info` or `warn` |
 
-The public Next.js variables are embedded at build time. Changing them in Vercel requires a new build. They are URLs, not secrets. Do not add MongoDB credentials, OAuth credentials, session secrets, or other private values to `NEXT_PUBLIC_*` variables.
+The public Next.js variables are embedded at build time. Changing them in Vercel requires a new build. They are URLs, not secrets. Do not add MongoDB credentials, OAuth credentials, `AUTH_TOKEN_SECRET`, or other private values to `NEXT_PUBLIC_*` variables.
 
 ## Local Development
 
@@ -56,13 +55,13 @@ Before enabling chat traffic on an existing database, run `npm run migrate:chat-
 
 Create a separate Cloudinary upload preset for each environment. Set it to **signed**, allow only `jpg`, `png`, and `webp`, and configure a maximum file size of `5242880` bytes. Do not expose `CLOUDINARY_API_SECRET` to Vercel or any `NEXT_PUBLIC_*` variable. The authenticated server signature binds the upload to a generated public ID and a per-user hashed folder. After direct upload, the client submits only the public ID; the server looks up and verifies the resource, owner folder, resource type, format, and actual byte count before changing the profile. Run an end-to-end upload check against staging credentials before enabling production uploads.
 
-## CORS, Cookies, and Authentication Boundary
+## CORS and Authentication Boundary
 
-Express and Socket.IO use the same exact `FRONTEND_URL` allowlist with credentials enabled. A browser origin not on the list is rejected; requests without an `Origin` header remain usable for non-browser clients. CORS is not authentication or authorization. An allowed origin does not grant access to user data.
+Express and Socket.IO use the same exact `FRONTEND_URL` allowlist. CORS credentials are disabled; protected HTTP calls send `Authorization: Bearer <access-token>`, and Socket.IO sends the token in its `auth` handshake payload. A browser origin not on the list is rejected; requests without an `Origin` header remain usable for non-browser clients. CORS is not authentication or authorization. An allowed origin does not grant access to user data.
 
-The default Vercel and Render domains are cross-site. Browser requests need credentials, cookies need `HttpOnly`, `Secure`, `SameSite=None`, and HTTPS, and state-changing requests need CSRF protection. Browser third-party-cookie policies can still block cross-site cookies; custom sibling domains (for example, `app.example.com` and `api.example.com`) are preferable for session-based production authentication. Choose a narrow cookie path/domain and an explicit expiry policy.
+Google OAuth uses a short-lived signed state. After callback verification, the API sends a 15-minute access token in the URL fragment; the frontend validates the state, strips the fragment from browser history, and stores the token in memory only. A page reload or token expiry requires a new sign-in. Do not persist tokens in local or session storage or include them in logs. Logout revokes previously issued access tokens for that user and disconnects active sockets. No authentication cookies or CSRF endpoint are used.
 
-The Socket.IO handshake validates the same Mongo-backed server session used by Express and checks the active user. Conversation joins, message sends, delivery/read receipts, and typing events verify membership server-side. CORS alone must never be treated as an access control. Process-local presence is limited to one backend instance until a shared presence store and compatible Socket.IO adapter are deployed. Socket events are not durable; clients must recover missed messages through the cursor-paginated history API after reconnect.
+The Socket.IO handshake validates the bearer token and checks the active user and token revocation version. Conversation joins, message sends, delivery/read receipts, and typing events verify membership server-side. CORS alone must never be treated as an access control. Process-local presence is limited to one backend instance until a shared presence store and compatible Socket.IO adapter are deployed. Socket events are not durable; clients must recover missed messages through the cursor-paginated history API after reconnect.
 
 ## Connectivity Checks
 
@@ -78,7 +77,7 @@ npm ci
 npm run typecheck && npm test && npm run build
 ```
 
-The server integration test starts a local ephemeral listener and checks health, trusted credentialed CORS, untrusted-origin rejection, a Socket.IO handshake, and an unavailable endpoint without a real database. To probe a hosted service manually, use its health URL and compare a trusted origin response with an untrusted one:
+The server integration test starts a local ephemeral listener and checks health, trusted CORS, untrusted-origin rejection, bearer-authenticated HTTP and Socket.IO, and an unavailable endpoint without a real database. To probe a hosted service manually, use its health URL and compare a trusted origin response with an untrusted one:
 
 ```sh
 curl -i https://your-backend.onrender.com/api/v1/health
@@ -86,7 +85,7 @@ curl -i -H 'Origin: https://your-frontend.example' https://your-backend.onrender
 curl -i -H 'Origin: https://untrusted.example' https://your-backend.onrender.com/api/v1/health
 ```
 
-The trusted response should include the exact `Access-Control-Allow-Origin` and `Access-Control-Allow-Credentials: true`. The untrusted response must not grant CORS permission. Verify Socket.IO from the browser network panel or an authorized client; do not infer a successful WebSocket connection from a healthy HTTP response alone.
+The trusted response should include the exact `Access-Control-Allow-Origin`; it should not include `Access-Control-Allow-Credentials`. The untrusted response must not grant CORS permission. Verify Socket.IO from the browser network panel or an authorized client; do not infer a successful WebSocket connection from a healthy HTTP response alone.
 
 ## Troubleshooting
 
@@ -102,9 +101,9 @@ The trusted response should include the exact `Access-Control-Allow-Origin` and 
 - [ ] Client lint, typecheck, tests, and production build pass; server typecheck, tests, and production build pass.
 - [ ] Preview points to staging only, with no production database or secret reuse.
 - [ ] Vercel Production has the correct API base URL and separate Socket.IO origin.
-- [ ] Render has `NODE_ENV=production`, secret `MONGODB_URI`, exact HTTPS `FRONTEND_URL`, `COOKIE_SECURE=true`, and a health check at `/api/v1/health`.
+- [ ] Render has `NODE_ENV=production`, secret `MONGODB_URI`, private `AUTH_TOKEN_SECRET`, exact HTTPS `FRONTEND_URL`, and a health check at `/api/v1/health`.
 - [ ] Atlas network access allows only required sources; credentials are not in tracked files.
 - [ ] Hosted health and CORS checks pass, and the browser confirms Socket.IO connectivity.
 - [ ] No private chat traffic is enabled before shared HTTP/socket authentication and authorization are implemented.
 
-Local builds and tests can verify code and the isolated integration path. They do not verify Vercel or Render deployment, live Atlas access, real-domain cookie behavior, or browser third-party-cookie policy; those require provider access, configured secrets, and the deployed domains.
+Local builds and checks can verify code and the isolated integration path. They do not verify Vercel or Render deployment, live Atlas access, or OAuth behavior on deployed domains; those require provider access, configured secrets, and the deployed domains.

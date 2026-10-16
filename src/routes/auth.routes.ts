@@ -1,8 +1,8 @@
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import { OAuth2Client } from 'google-auth-library';
-import { buildSessionPayload } from '../config/session.js';
-import { issueCsrfToken, requireAuth, requireCsrf } from '../middleware/auth.js';
+import { createRequireAuth } from '../middleware/auth.js';
+import { issueAccessToken, issueOAuthState, verifyOAuthState } from '../auth/tokens.js';
 import { User } from '../models/user.model.js';
 import { AppError } from '../utils/error.js';
 import { sendSuccessResponse } from '../utils/response.js';
@@ -13,28 +13,14 @@ export type GoogleOAuthClient = Pick<
 >;
 
 export interface AuthRouterOptions {
+  tokenSecret: string;
   googleClientId?: string;
   googleClientSecret?: string;
   googleCallbackUrl?: string;
   postLoginRedirectUrl?: string;
   redirectAllowlist?: readonly string[];
-  sessionIdleTimeoutMs?: number;
-  sessionAbsoluteTimeoutMs?: number;
-  cookieName?: string;
   onLogout?: (userId: string) => void;
   oauthClient?: GoogleOAuthClient;
-}
-
-function saveSession(session: Express.Request['session']): Promise<void> {
-  return new Promise((resolve, reject) => {
-    session.save((error) => (error ? reject(error) : resolve()));
-  });
-}
-
-function regenerateSession(session: Express.Request['session']): Promise<void> {
-  return new Promise((resolve, reject) => {
-    session.regenerate((error) => (error ? reject(error) : resolve()));
-  });
 }
 
 function matchesSecret(actual: string, expected: string): boolean {
@@ -46,15 +32,18 @@ function matchesSecret(actual: string, expected: string): boolean {
 function normalizeRedirect(value: string): string | undefined {
   try {
     const url = new URL(value);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return undefined;
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) {
+      return undefined;
+    }
     return url.href;
   } catch {
     return undefined;
   }
 }
 
-export function createAuthRouter(options: AuthRouterOptions = {}): Router {
+export function createAuthRouter(options: AuthRouterOptions): Router {
   const router = Router();
+  const requireAuth = createRequireAuth(options.tokenSecret);
   const oauthClient = options.oauthClient ?? (
     options.googleClientId && options.googleClientSecret && options.googleCallbackUrl
       ? new OAuth2Client(
@@ -67,8 +56,6 @@ export function createAuthRouter(options: AuthRouterOptions = {}): Router {
   const approvedRedirects = new Set(
     (options.redirectAllowlist ?? []).map(normalizeRedirect).filter(Boolean),
   );
-  const idleTimeoutMs = options.sessionIdleTimeoutMs ?? 7 * 24 * 60 * 60 * 1000;
-  const absoluteTimeoutMs = options.sessionAbsoluteTimeoutMs ?? 30 * 24 * 60 * 60 * 1000;
 
   function resolveRedirect(value: string | undefined): string {
     const normalized = value ? normalizeRedirect(value) : undefined;
@@ -85,17 +72,9 @@ export function createAuthRouter(options: AuthRouterOptions = {}): Router {
     return oauthClient;
   }
 
-  router.get('/csrf', (request, response) => {
-    const csrfToken = issueCsrfToken(request.session);
-    sendSuccessResponse(response, 200, 'CSRF token issued', { csrfToken });
-  });
-
   router.get('/me', requireAuth, (request, response) => {
     const user = request.user;
-    if (!user) {
-      throw new AppError(401, 'AUTH_REQUIRED', 'Authentication required');
-    }
-
+    if (!user) throw new AppError(401, 'AUTH_REQUIRED', 'Authentication required');
     sendSuccessResponse(response, 200, 'Current user loaded', {
       user: {
         id: user.id,
@@ -106,59 +85,38 @@ export function createAuthRouter(options: AuthRouterOptions = {}): Router {
     });
   });
 
-  router.post('/logout', requireAuth, requireCsrf, (request, response) => {
-    const userId = request.user?.id;
-    request.session.destroy((error) => {
-      if (error) {
-        response.status(500).json({
-          statusCode: 500,
-          message: 'Logout failed',
-          data: { code: 'LOGOUT_FAILED' },
-        });
-        return;
-      }
-
-      if (userId) options.onLogout?.(userId);
-      response.clearCookie(options.cookieName ?? '__Host-chat_session', { path: '/' });
-      sendSuccessResponse(response, 200, 'Logged out', { loggedOut: true });
-    });
+  router.post('/logout', requireAuth, async (request, response) => {
+    const userId = request.user!.id;
+    await User.findByIdAndUpdate(userId, { $inc: { authTokenVersion: 1 } });
+    options.onLogout?.(userId);
+    sendSuccessResponse(response, 200, 'Logged out', { loggedOut: true });
   });
 
-  router.post('/mock-login', requireCsrf, (request, response) => {
+  router.post('/mock-login', (request, response) => {
     if (request.app.get('env') !== 'test') {
       throw new AppError(404, 'NOT_FOUND', 'Route not found');
     }
-
     const { userId } = request.body as { userId?: string };
-    if (!userId) {
-      throw new AppError(400, 'INVALID_REQUEST', 'userId is required');
-    }
-
-    request.session.userId = userId;
-    request.session.createdAt = new Date();
-    request.session.lastActivityAt = new Date();
-    request.session.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    request.session.idleExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-
-    sendSuccessResponse(response, 200, 'Mock login successful', { ok: true });
+    if (!userId) throw new AppError(400, 'INVALID_REQUEST', 'userId is required');
+    const accessToken = issueAccessToken(userId, 0, options.tokenSecret);
+    sendSuccessResponse(response, 200, 'Mock login successful', { accessToken });
   });
 
   router.get('/google', async (request, response) => {
     const client = requireOAuthConfiguration();
     const requestedRedirect = request.query.returnTo;
-    if (requestedRedirect !== undefined && typeof requestedRedirect !== 'string') {
-      throw new AppError(400, 'INVALID_REDIRECT', 'Redirect URL is not allowed');
+    const clientState = request.query.clientState;
+    if (
+      (requestedRedirect !== undefined && typeof requestedRedirect !== 'string') ||
+      typeof clientState !== 'string' ||
+      !/^[A-Za-z0-9_-]{32,128}$/.test(clientState)
+    ) {
+      throw new AppError(400, 'OAUTH_STATE_INVALID', 'Google sign-in could not be validated');
     }
-    const returnTo = resolveRedirect(
-      requestedRedirect ?? options.postLoginRedirectUrl,
-    );
-    const state = randomBytes(32).toString('base64url');
-    const nonce = randomBytes(32).toString('base64url');
-    request.session.oauthState = state;
-    request.session.oauthNonce = nonce;
-    request.session.oauthReturnTo = returnTo;
-    await saveSession(request.session);
 
+    const returnTo = resolveRedirect(requestedRedirect ?? options.postLoginRedirectUrl);
+    const nonce = randomBytes(32).toString('base64url');
+    const state = issueOAuthState({ clientState, nonce, returnTo }, options.tokenSecret);
     response.redirect(client.generateAuthUrl({
       access_type: 'online',
       include_granted_scopes: true,
@@ -173,23 +131,17 @@ export function createAuthRouter(options: AuthRouterOptions = {}): Router {
   router.get('/google/callback', async (request, response) => {
     const client = requireOAuthConfiguration();
     const code = request.query.code;
-    const state = request.query.state;
-    const storedState = request.session.oauthState;
-    const nonce = request.session.oauthNonce;
-    const returnTo = request.session.oauthReturnTo;
-
-    if (typeof code !== 'string' || typeof state !== 'string' || !storedState || !nonce) {
-      throw new AppError(400, 'OAUTH_STATE_INVALID', 'Google sign-in could not be validated');
-    }
-    if (!matchesSecret(state, storedState)) {
+    const stateToken = request.query.state;
+    if (typeof code !== 'string' || typeof stateToken !== 'string') {
       throw new AppError(400, 'OAUTH_STATE_INVALID', 'Google sign-in could not be validated');
     }
 
-    delete request.session.oauthState;
-    delete request.session.oauthNonce;
-    delete request.session.oauthReturnTo;
-    await saveSession(request.session);
-
+    let oauthState;
+    try {
+      oauthState = verifyOAuthState(stateToken, options.tokenSecret);
+    } catch {
+      throw new AppError(400, 'OAUTH_STATE_INVALID', 'Google sign-in could not be validated');
+    }
     const { tokens } = await client.getToken(code);
     if (!tokens.id_token) {
       throw new AppError(401, 'OAUTH_TOKEN_INVALID', 'Google did not return a valid identity token');
@@ -205,7 +157,7 @@ export function createAuthRouter(options: AuthRouterOptions = {}): Router {
       profile.email_verified !== true ||
       !profile.name ||
       !profile.nonce ||
-      !matchesSecret(profile.nonce, nonce)
+      !matchesSecret(profile.nonce, oauthState.nonce)
     ) {
       throw new AppError(401, 'OAUTH_IDENTITY_INVALID', 'Google identity could not be validated');
     }
@@ -221,20 +173,19 @@ export function createAuthRouter(options: AuthRouterOptions = {}): Router {
       throw new AppError(403, 'ACCOUNT_DISABLED', 'This account is disabled');
     }
 
-    await regenerateSession(request.session);
-    const sessionPayload = buildSessionPayload({
-      userId: user._id.toString(),
-      idleMs: idleTimeoutMs,
-      absoluteMs: absoluteTimeoutMs,
-    });
-    request.session.userId = sessionPayload.userId;
-    request.session.createdAt = sessionPayload.createdAt;
-    request.session.lastActivityAt = sessionPayload.lastActivityAt;
-    request.session.idleExpiresAt = sessionPayload.idleExpiresAt;
-    request.session.expiresAt = sessionPayload.expiresAt;
-    await saveSession(request.session);
-
-    response.redirect(resolveRedirect(returnTo));
+    const accessToken = issueAccessToken(
+      user._id.toString(),
+      user.authTokenVersion ?? 0,
+      options.tokenSecret,
+    );
+    const redirect = new URL(resolveRedirect(oauthState.returnTo));
+    redirect.hash = new URLSearchParams({
+      access_token: accessToken,
+      state: oauthState.clientState,
+    }).toString();
+    response.setHeader('Cache-Control', 'no-store');
+    response.setHeader('Referrer-Policy', 'no-referrer');
+    response.redirect(redirect.href);
   });
 
   return router;

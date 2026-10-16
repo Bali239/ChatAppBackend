@@ -3,7 +3,6 @@ import { createServer } from 'node:http';
 import request from 'supertest';
 import { z } from 'zod';
 import { createApp } from '../src/app.js';
-import { createSessionMiddleware } from '../src/config/session.js';
 import { attachSocketServer } from '../src/realtime/socket.js';
 import { createErrorHandler } from '../src/middleware/error-handler.js';
 import { notFoundHandler } from '../src/middleware/not-found.js';
@@ -69,13 +68,14 @@ describe('HTTP application', () => {
     });
   });
 
-  it('permits configured origins with credentials', async () => {
+  it('permits configured origins without credentialed cookies', async () => {
     const response = await request(createTestApp())
       .get('/api/v1/health')
       .set('Origin', origin);
 
     expect(response.headers['access-control-allow-origin']).toBe(origin);
-    expect(response.headers['access-control-allow-credentials']).toBe('true');
+    expect(response.headers['access-control-allow-credentials']).toBeUndefined();
+    expect(response.headers.vary).toContain('Origin');
   });
 
   it('rejects origins that are not configured', async () => {
@@ -180,10 +180,7 @@ describe('success responses', () => {
 describe('Socket.IO transport', () => {
   it('attaches to the supplied HTTP server and only trusts configured origins', async () => {
     const httpServer = createServer();
-    const sessionMiddleware = createSessionMiddleware({
-      secret: 'this_is_a_valid_session_secret_value',
-    });
-    const io = attachSocketServer(httpServer, [origin], logger, sessionMiddleware);
+    const io = attachSocketServer(httpServer, [origin], logger, 'test-only-auth-token-secret-at-least-32-chars');
     expect(io.httpServer).toBe(httpServer);
 
     await new Promise<void>((resolveListen) => httpServer.listen(0, resolveListen));

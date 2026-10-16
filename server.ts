@@ -5,7 +5,6 @@ import type { Server as SocketServer } from 'socket.io';
 import { createApp } from './src/app.js';
 import { connectDatabase, disconnectDatabase, getDatabaseStatus } from './src/config/database.js';
 import { loadEnvironment } from './src/config/env.js';
-import { createSessionMiddleware } from './src/config/session.js';
 import type { Environment } from './src/schemas/env.schema.js';
 import { attachSocketServer } from './src/realtime/socket.js';
 import { createLogger, type AppLogger } from './src/utils/logger.js';
@@ -21,21 +20,12 @@ export async function startServer(
   logger: AppLogger,
 ): Promise<ServerRuntime> {
   let disconnectUserSockets: (userId: string) => void = () => undefined;
-  const sessionMiddleware = createSessionMiddleware({
-    secret: environment.SESSION_SECRET ?? 'development-session-secret-change-me',
-    cookieName: environment.COOKIE_NAME,
-    mongoUri: environment.MONGODB_URI,
-    secure: environment.COOKIE_SECURE,
-    sameSite: environment.COOKIE_SAME_SITE,
-    maxAge: environment.SESSION_IDLE_TIMEOUT_MS,
-    isProduction: environment.NODE_ENV === 'production',
-  });
   const app = createApp({
     frontendOrigins: environment.FRONTEND_URL,
     environment: environment.NODE_ENV,
     logger,
     getDatabaseStatus,
-    sessionMiddleware,
+    authTokenSecret: environment.AUTH_TOKEN_SECRET,
     cloudinary: environment.CLOUDINARY_CLOUD_NAME &&
       environment.CLOUDINARY_API_KEY &&
       environment.CLOUDINARY_API_SECRET &&
@@ -53,15 +43,18 @@ export async function startServer(
       googleCallbackUrl: environment.GOOGLE_CALLBACK_URL,
       postLoginRedirectUrl: environment.POST_LOGIN_REDIRECT_URL,
       redirectAllowlist: environment.AUTH_REDIRECT_ALLOWLIST,
-      sessionIdleTimeoutMs: environment.SESSION_IDLE_TIMEOUT_MS,
-      sessionAbsoluteTimeoutMs: environment.SESSION_ABSOLUTE_TIMEOUT_MS,
       onLogout: (userId) => disconnectUserSockets(userId),
     },
   });
   const httpServer = createServer(app);
 
   await connectDatabase(environment.MONGODB_URI, logger);
-  const io = attachSocketServer(httpServer, environment.FRONTEND_URL, logger, sessionMiddleware);
+  const io = attachSocketServer(
+    httpServer,
+    environment.FRONTEND_URL,
+    logger,
+    environment.AUTH_TOKEN_SECRET,
+  );
   disconnectUserSockets = (userId) => io.in(`user:${userId}`).disconnectSockets(true);
 
   try {

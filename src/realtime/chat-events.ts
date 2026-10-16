@@ -4,7 +4,6 @@ import {
   messagePositionPayloadSchema,
   messageSendPayloadSchema,
 } from './events.js';
-import { isSessionExpired, type SessionPayload } from '../config/session.js';
 import { Conversation } from '../models/conversation.model.js';
 import { ConversationMember } from '../models/conversation-member.model.js';
 import { Message } from '../models/message.model.js';
@@ -18,10 +17,6 @@ const SENDS_PER_WINDOW = 20;
 const SEND_WINDOW_MS = 10_000;
 const TYPING_EXPIRY_MS = 5_000;
 const TYPING_THROTTLE_MS = 250;
-
-type SocketRequestWithSession = ChatSocket['request'] & {
-  session?: Partial<SessionPayload>;
-};
 
 interface TypingEntry {
   socketIds: Set<string>;
@@ -53,13 +48,16 @@ function toSocketError(error: unknown): SocketError {
 }
 
 async function assertSocketSession(socket: ChatSocket): Promise<void> {
-  const session = (socket.request as SocketRequestWithSession).session;
-  if (!session?.userId || session.revokedAt || isSessionExpired(session)) {
+  if (socket.data.tokenExpiresAt <= Math.floor(Date.now() / 1000)) {
     socket.disconnect(true);
     throw new AppError(401, 'AUTH_REQUIRED', 'Authentication required');
   }
   const user = await User.findById(socket.data.userId);
-  if (!user || !user.isActive()) {
+  if (
+    !user ||
+    !user.isActive() ||
+    (user.authTokenVersion ?? 0) !== socket.data.tokenVersion
+  ) {
     socket.disconnect(true);
     throw new AppError(401, 'AUTH_REQUIRED', 'Authentication required');
   }

@@ -3,7 +3,6 @@ import { Types } from 'mongoose';
 import { io as createSocketClient, type Socket } from 'socket.io-client';
 import { vi } from 'vitest';
 import { createApp } from '../src/app.js';
-import { createSessionMiddleware } from '../src/config/session.js';
 import { Conversation } from '../src/models/conversation.model.js';
 import { ConversationMember } from '../src/models/conversation-member.model.js';
 import { Message } from '../src/models/message.model.js';
@@ -15,23 +14,21 @@ import { createLogger } from '../src/utils/logger.js';
 const trustedOrigin = 'http://localhost:3000';
 
 describe('local HTTP and Socket.IO integration', () => {
-  it('shares authenticated sessions with sockets and disconnects them on logout', async () => {
+  it('authenticates HTTP and sockets with bearer tokens and disconnects them on logout', async () => {
     const logger = createLogger('silent');
     const authenticatedUserId = new Types.ObjectId();
     let disconnectUserSockets: (userId: string) => void = () => undefined;
-    const sessionMiddleware = createSessionMiddleware({
-      secret: 'this_is_a_valid_session_secret_value',
-    });
+    const tokenSecret = 'test-only-auth-token-secret-at-least-32-chars';
     const app = createApp({
       frontendOrigins: [trustedOrigin],
       environment: 'test',
       logger,
       getDatabaseStatus: () => 'connected',
-      sessionMiddleware,
+      authTokenSecret: tokenSecret,
       auth: { onLogout: (userId) => disconnectUserSockets(userId) },
     });
     const httpServer = createServer(app);
-    const socketServer = attachSocketServer(httpServer, [trustedOrigin], logger, sessionMiddleware);
+    const socketServer = attachSocketServer(httpServer, [trustedOrigin], logger, tokenSecret);
     disconnectUserSockets = (userId) => socketServer.in(`user:${userId}`).disconnectSockets(true);
     let client: Socket | undefined;
     let authenticatedClient: Socket | undefined;
@@ -57,19 +54,20 @@ describe('local HTTP and Socket.IO integration', () => {
         headers: { Origin: trustedOrigin },
       });
       expect(trustedResponse.headers.get('access-control-allow-origin')).toBe(trustedOrigin);
-      expect(trustedResponse.headers.get('access-control-allow-credentials')).toBe('true');
+      expect(trustedResponse.headers.get('access-control-allow-credentials')).toBeNull();
 
       const trustedPreflight = await fetch(`${baseUrl}/api/v1/health`, {
         method: 'OPTIONS',
         headers: {
           Origin: trustedOrigin,
           'Access-Control-Request-Method': 'POST',
-          'Access-Control-Request-Headers': 'content-type',
+          'Access-Control-Request-Headers': 'authorization,content-type',
         },
       });
       expect(trustedPreflight.status).toBe(204);
       expect(trustedPreflight.headers.get('access-control-allow-origin')).toBe(trustedOrigin);
-      expect(trustedPreflight.headers.get('access-control-allow-credentials')).toBe('true');
+      expect(trustedPreflight.headers.get('access-control-allow-credentials')).toBeNull();
+      expect(trustedPreflight.headers.get('access-control-allow-headers')).toContain('Authorization');
 
       const untrustedResponse = await fetch(`${baseUrl}/api/v1/health`, {
         headers: { Origin: 'https://untrusted.example' },
@@ -89,7 +87,6 @@ describe('local HTTP and Socket.IO integration', () => {
       expect(untrustedPreflight.headers.get('access-control-allow-origin')).toBeNull();
 
       client = createSocketClient(baseUrl, {
-        withCredentials: true,
         reconnection: false,
         timeout: 2_000,
         transports: ['websocket'],
@@ -104,33 +101,30 @@ describe('local HTTP and Socket.IO integration', () => {
       vi.spyOn(User, 'findById').mockResolvedValue({
         _id: authenticatedUserId,
         accountStatus: 'active',
+        authTokenVersion: 0,
         isActive: () => true,
       } as never);
-      const csrfResponse = await fetch(`${baseUrl}/api/v1/auth/csrf`);
-      const sessionCookie = csrfResponse.headers.get('set-cookie')?.split(';')[0];
-      if (!sessionCookie) throw new Error('Expected an HTTP session cookie');
-      const csrfBody = (await csrfResponse.json()) as { data: { csrfToken: string } };
       const loginResponse = await fetch(`${baseUrl}/api/v1/auth/mock-login`, {
         method: 'POST',
         headers: {
           Origin: trustedOrigin,
           'Content-Type': 'application/json',
-          Cookie: sessionCookie,
-          'X-CSRF-Token': csrfBody.data.csrfToken,
         },
         body: JSON.stringify({ userId: authenticatedUserId.toString() }),
       });
       expect(loginResponse.status).toBe(200);
+      const loginBody = (await loginResponse.json()) as { data: { accessToken: string } };
+      const accessToken = loginBody.data.accessToken;
       const currentUserResponse = await fetch(`${baseUrl}/api/v1/auth/me`, {
-        headers: { Cookie: sessionCookie },
+        headers: { Authorization: `Bearer ${accessToken}` },
       });
       expect(currentUserResponse.status).toBe(200);
 
       authenticatedClient = createSocketClient(baseUrl, {
-        withCredentials: true,
+        auth: { token: accessToken },
         reconnection: false,
         timeout: 2_000,
-        extraHeaders: { Origin: trustedOrigin, Cookie: sessionCookie },
+        extraHeaders: { Origin: trustedOrigin },
       });
       await new Promise<void>((resolveConnect, rejectConnect) => {
         authenticatedClient?.once('connect', resolveConnect);
@@ -223,11 +217,14 @@ describe('local HTTP and Socket.IO integration', () => {
         method: 'POST',
         headers: {
           Origin: trustedOrigin,
-          Cookie: sessionCookie,
-          'X-CSRF-Token': csrfBody.data.csrfToken,
+          Authorization: `Bearer ${accessToken}`,
         },
       });
       expect(logoutResponse.status).toBe(200);
+      const rejectedAfterLogout = await fetch(`${baseUrl}/api/v1/auth/me`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      expect(rejectedAfterLogout.status).toBe(401);
       await disconnected;
       expect(authenticatedClient.connected).toBe(false);
 

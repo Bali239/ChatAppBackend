@@ -31,15 +31,6 @@ const frontendOriginsSchema = z
   })
   .transform((origins) => origins.map((origin) => new URL(origin).origin));
 
-const optionalBooleanSchema = z.preprocess((value) => {
-  if (typeof value !== 'string') return value;
-
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'true') return true;
-  if (normalized === 'false') return false;
-  return value;
-}, z.boolean().optional());
-
 const optionalUrlListSchema = z.preprocess(
   (value) => {
     if (typeof value !== 'string') return value;
@@ -57,7 +48,7 @@ export const environmentSchema = z
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     MONGODB_URI: z.string().min(1).regex(/^mongodb(?:\+srv)?:\/\//),
     FRONTEND_URL: frontendOriginsSchema,
-    SESSION_SECRET: z.string().min(32).optional(),
+    AUTH_TOKEN_SECRET: z.string().min(32),
     GOOGLE_CLIENT_ID: z.string().min(1).optional(),
     GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
     GOOGLE_CALLBACK_URL: z.string().url().optional(),
@@ -68,33 +59,12 @@ export const environmentSchema = z
     CLOUDINARY_API_KEY: z.string().min(1).optional(),
     CLOUDINARY_API_SECRET: z.string().min(1).optional(),
     CLOUDINARY_AVATAR_UPLOAD_PRESET: z.string().min(1).optional(),
-    SESSION_IDLE_TIMEOUT_MS: z.coerce.number().int().min(1).default(7 * 24 * 60 * 60 * 1000),
-    SESSION_ABSOLUTE_TIMEOUT_MS: z.coerce.number().int().min(1).default(30 * 24 * 60 * 60 * 1000),
-    COOKIE_NAME: z.string().min(1).default('__Host-chat_session'),
-    COOKIE_SECURE: optionalBooleanSchema.default(false),
-    COOKIE_SAME_SITE: z.enum(['lax', 'strict', 'none']).default('lax'),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   })
   .superRefine((environment, context) => {
-    if (environment.COOKIE_SAME_SITE === 'none' && !environment.COOKIE_SECURE) {
-      context.addIssue({
-        code: 'custom',
-        path: ['COOKIE_SECURE'],
-        message: 'must be true when COOKIE_SAME_SITE is none',
-      });
-    }
-
     if (environment.NODE_ENV === 'production') {
-      if (!environment.COOKIE_SECURE) {
-        context.addIssue({
-          code: 'custom',
-          path: ['COOKIE_SECURE'],
-          message: 'must be true in production',
-        });
-      }
-
       const requiredValues = {
-        SESSION_SECRET: environment.SESSION_SECRET,
+        AUTH_TOKEN_SECRET: environment.AUTH_TOKEN_SECRET,
         GOOGLE_CLIENT_ID: environment.GOOGLE_CLIENT_ID,
         GOOGLE_CLIENT_SECRET: environment.GOOGLE_CLIENT_SECRET,
         GOOGLE_CALLBACK_URL: environment.GOOGLE_CALLBACK_URL,

@@ -1,8 +1,7 @@
 import type { Server as HttpServer } from 'node:http';
-import type { RequestHandler } from 'express';
 import { Server as SocketServer } from 'socket.io';
 import { createCorsOptions, isTrustedOrigin } from '../config/cors.js';
-import { isSessionExpired, type SessionPayload } from '../config/session.js';
+import { verifyAccessToken } from '../auth/tokens.js';
 import { User } from '../models/user.model.js';
 import { clearUserSendRateLimit, registerChatEvents } from './chat-events.js';
 import type {
@@ -16,29 +15,24 @@ import type {
 import { addUserConnection, removeUserConnection } from './presence.js';
 import type { AppLogger } from '../utils/logger.js';
 
-type SocketRequestWithSession = ChatSocket['request'] & {
-  session?: Partial<SessionPayload>;
-};
-
-async function authenticateSocket(socket: ChatSocket): Promise<string> {
-  const session = (socket.request as SocketRequestWithSession).session;
-  if (!session?.userId || session.revokedAt || isSessionExpired(session)) {
+async function authenticateSocket(socket: ChatSocket, tokenSecret: string): Promise<void> {
+  const token = socket.handshake.auth?.token;
+  if (typeof token !== 'string') throw new Error('Authentication required');
+  const claims = verifyAccessToken(token, tokenSecret);
+  const user = await User.findById(claims.userId);
+  if (!user || !user.isActive() || (user.authTokenVersion ?? 0) !== claims.tokenVersion) {
     throw new Error('Authentication required');
   }
-
-  const user = await User.findById(session.userId);
-  if (!user || !user.isActive()) {
-    throw new Error('Authentication required');
-  }
-
-  return user._id.toString();
+  socket.data.userId = user._id.toString();
+  socket.data.tokenVersion = claims.tokenVersion;
+  socket.data.tokenExpiresAt = claims.expiresAt;
 }
 
 export function attachSocketServer(
   httpServer: HttpServer,
   frontendOrigins: readonly string[],
   logger: AppLogger,
-  sessionMiddleware: RequestHandler,
+  tokenSecret: string,
 ): ChatSocketServer {
   const io = new SocketServer<
     ClientToServerEvents,
@@ -56,13 +50,9 @@ export function attachSocketServer(
     maxHttpBufferSize: 1_000_000,
   });
 
-  io.engine.use(sessionMiddleware);
   io.use((socket, next) => {
-    void authenticateSocket(socket)
-      .then((userId) => {
-        socket.data.userId = userId;
-        next();
-      })
+    void authenticateSocket(socket, tokenSecret)
+      .then(() => next())
       .catch(() => next(new Error('Authentication required')));
   });
 

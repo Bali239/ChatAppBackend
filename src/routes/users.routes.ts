@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { type CloudinaryCredentials, updateUserProfile } from '../services/avatar.service.js';
 import { listEligibleUsers, searchEligibleUsers } from '../services/user-directory.service.js';
 import { isUserOnline } from '../realtime/presence.js';
-import { requireAuth, requireCsrf } from '../middleware/auth.js';
+import { createRequireAuth } from '../middleware/auth.js';
 import { User } from '../models/user.model.js';
 import { AppError } from '../utils/error.js';
 import type { AppLogger } from '../utils/logger.js';
@@ -49,11 +49,12 @@ const searchRateLimit = rateLimit({
 });
 
 export function createUsersRouter(options: {
+  tokenSecret: string;
   cloudinary?: CloudinaryCredentials;
   logger: AppLogger;
 }): Router {
   const router = Router();
-  router.use(requireAuth);
+  router.use(createRequireAuth(options.tokenSecret));
 
   router.get('/', validateRequest({ query: cursorQuerySchema }), async (request, response) => {
     const query = response.locals.validated.query as z.infer<typeof cursorQuerySchema>;
@@ -96,7 +97,6 @@ export function createUsersRouter(options: {
 
   router.patch(
     '/me/profile',
-    requireCsrf,
     validateRequest({ body: profileUpdateSchema }),
     async (request, response) => {
       const body = response.locals.validated.body as z.infer<typeof profileUpdateSchema>;

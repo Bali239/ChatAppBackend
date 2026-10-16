@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth, requireCsrf } from '../middleware/auth.js';
+import { createRequireAuth } from '../middleware/auth.js';
 import { findOrCreateDirectConversation } from '../services/conversation.service.js';
 import { listConversationsForUser } from '../services/conversation-list.service.js';
 import {
@@ -28,9 +28,9 @@ const readPositionSchema = z.object({
   messageId: z.string().regex(/^[a-f\d]{24}$/i),
 }).strict();
 
-export function createConversationsRouter(): Router {
+export function createConversationsRouter(tokenSecret: string): Router {
   const router = Router();
-  router.use(requireAuth);
+  router.use(createRequireAuth(tokenSecret));
 
   router.get('/', validateRequest({ query: pageQuerySchema }), async (request, response) => {
     const query = response.locals.validated.query as z.infer<typeof pageQuerySchema>;
@@ -44,7 +44,6 @@ export function createConversationsRouter(): Router {
 
   router.post(
     '/direct/:userId',
-    requireCsrf,
     validateRequest({ params: directUserParamsSchema, body: z.object({}).strict() }),
     async (_request, response) => {
       const { userId } = response.locals.validated.params as z.infer<typeof directUserParamsSchema>;
@@ -74,7 +73,6 @@ export function createConversationsRouter(): Router {
 
   router.post(
     '/:conversationId/clear',
-    requireCsrf,
     validateRequest({ params: conversationIdParamsSchema, body: z.object({}).strict() }),
     async (request, response) => {
       const { conversationId } = response.locals.validated.params as z.infer<typeof conversationIdParamsSchema>;
@@ -85,7 +83,6 @@ export function createConversationsRouter(): Router {
 
   router.post(
     '/:conversationId/read',
-    requireCsrf,
     validateRequest({ params: conversationIdParamsSchema, body: readPositionSchema }),
     async (request, response) => {
       const { conversationId } = response.locals.validated.params as z.infer<typeof conversationIdParamsSchema>;

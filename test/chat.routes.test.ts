@@ -17,7 +17,7 @@ function createTestApp() {
     environment: 'test',
     logger,
     getDatabaseStatus: () => 'connected',
-    sessionSecret: 'this_is_a_valid_session_secret_value',
+    authTokenSecret: 'test-only-auth-token-secret-at-least-32-chars',
     cloudinary: {
       cloudName: 'test-cloud',
       apiKey: 'test-api-key',
@@ -35,18 +35,21 @@ async function createAuthenticatedAgent(app = createTestApp()) {
     displayName: 'Current User',
     avatarUrl: null,
     accountStatus: 'active',
+    authTokenVersion: 0,
     isActive: () => true,
   };
   vi.spyOn(User, 'findById').mockResolvedValue(user as never);
-  const agent = request.agent(app);
-  const csrfResponse = await agent.get('/api/v1/auth/csrf');
-  const csrfToken = csrfResponse.body.data.csrfToken as string;
-  await agent
+  const loginResponse = await request(app)
     .post('/api/v1/auth/mock-login')
-    .set('X-CSRF-Token', csrfToken)
     .send({ userId: userId.toString() })
     .expect(200);
-  return { agent, csrfToken };
+  const accessToken = loginResponse.body.data.accessToken as string;
+  const agent = {
+    get: (path: string) => request(app).get(path).set('Authorization', `Bearer ${accessToken}`),
+    post: (path: string) => request(app).post(path).set('Authorization', `Bearer ${accessToken}`),
+    patch: (path: string) => request(app).patch(path).set('Authorization', `Bearer ${accessToken}`),
+  };
+  return { agent, accessToken };
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -114,11 +117,10 @@ describe('chat REST routes', () => {
   });
 
   it('rejects profile fields outside the authenticated user allowlist', async () => {
-    const { agent, csrfToken } = await createAuthenticatedAgent();
+    const { agent } = await createAuthenticatedAgent();
 
     const response = await agent
       .patch('/api/v1/users/me/profile')
-      .set('X-CSRF-Token', csrfToken)
       .send({ displayName: 'Updated Name', accountStatus: 'disabled' })
       .expect(400);
 
@@ -150,17 +152,16 @@ describe('chat REST routes', () => {
       format: 'png',
       bytes: 100,
     } as never);
-    const agent = request.agent(createTestApp());
-    const csrfToken = (await agent.get('/api/v1/auth/csrf')).body.data.csrfToken as string;
-    await agent
+    const app = createTestApp();
+    const loginResponse = await request(app)
       .post('/api/v1/auth/mock-login')
-      .set('X-CSRF-Token', csrfToken)
       .send({ userId: userId.toString() })
       .expect(200);
+    const accessToken = loginResponse.body.data.accessToken as string;
 
-    const response = await agent
+    const response = await request(app)
       .patch('/api/v1/users/me/profile')
-      .set('X-CSRF-Token', csrfToken)
+      .set('Authorization', `Bearer ${accessToken}`)
       .send({ displayName: '  Updated   Name ', avatarPublicId })
       .expect(200);
 
@@ -189,34 +190,26 @@ describe('chat REST routes', () => {
   });
 
   it('rejects a client-selected clear cutoff and self-conversation', async () => {
-    const { agent, csrfToken } = await createAuthenticatedAgent();
+    const { agent } = await createAuthenticatedAgent();
     const conversationId = new Types.ObjectId();
 
     const clearResponse = await agent
       .post(`/api/v1/conversations/${conversationId}/clear`)
-      .set('X-CSRF-Token', csrfToken)
       .send({ clearedAt: '2026-01-01T00:00:00.000Z' })
       .expect(400);
     expect(clearResponse.body.data.code).toBe('VALIDATION_FAILED');
 
     const directResponse = await agent
       .post(`/api/v1/conversations/direct/${userId}`)
-      .set('X-CSRF-Token', csrfToken)
       .send({})
       .expect(400);
     expect(directResponse.body.data.code).toBe('SELF_CONVERSATION');
   });
 
-  it('rejects writes without a valid CSRF token and returns constrained avatar signatures', async () => {
-    const { agent, csrfToken } = await createAuthenticatedAgent();
-    await agent
-      .post('/api/v1/uploads/avatar/signature')
-      .send({})
-      .expect(403);
-
+  it('accepts bearer-authenticated writes and returns constrained avatar signatures', async () => {
+    const { agent } = await createAuthenticatedAgent();
     const response = await agent
       .post('/api/v1/uploads/avatar/signature')
-      .set('X-CSRF-Token', csrfToken)
       .send({})
       .expect(200);
 

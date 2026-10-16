@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth, requireCsrf } from '../middleware/auth.js';
+import { createRequireAuth } from '../middleware/auth.js';
 import {
   createAvatarUploadSignature,
   type CloudinaryCredentials,
@@ -9,13 +9,15 @@ import { AppError } from '../utils/error.js';
 import { sendSuccessResponse } from '../utils/response.js';
 import { validateRequest } from '../utils/validate-request.js';
 
-export function createUploadsRouter(options: { cloudinary?: CloudinaryCredentials }): Router {
+export function createUploadsRouter(options: {
+  tokenSecret: string;
+  cloudinary?: CloudinaryCredentials;
+}): Router {
   const router = Router();
-  router.use(requireAuth);
+  router.use(createRequireAuth(options.tokenSecret));
 
   router.post(
     '/avatar/signature',
-    requireCsrf,
     validateRequest({ body: z.object({}).strict() }),
     (request, response) => {
       if (!options.cloudinary) {
