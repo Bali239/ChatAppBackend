@@ -286,6 +286,7 @@ export function registerChatEvents(
         conversationId: parsed.data.conversationId,
         content: parsed.data.content,
         clientMessageId: parsed.data.clientMessageId,
+        attachment: parsed.data.attachment ?? undefined,
       });
       persistedRequestMessage = result.message;
       for (const participantId of result.participantIds) {

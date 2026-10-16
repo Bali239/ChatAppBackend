@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createRequireAuth } from '../middleware/auth.js';
 import {
   createAvatarUploadSignature,
+  createChatMediaUploadSignature,
   type CloudinaryCredentials,
 } from '../services/avatar.service.js';
 import { AppError } from '../utils/error.js';
@@ -15,6 +16,16 @@ export function createUploadsRouter(options: {
 }): Router {
   const router = Router();
   router.use(createRequireAuth(options.tokenSecret));
+
+  router.post(
+    '/media/signature',
+    validateRequest({ body: z.object({ type: z.enum(['image', 'video']) }).strict() }),
+    (request, response) => {
+      if (!options.cloudinary) throw new AppError(503, 'MEDIA_UPLOAD_UNAVAILABLE', 'Media uploads are not configured');
+      const { type } = response.locals.validated.body as { type: 'image' | 'video' };
+      sendSuccessResponse(response, 200, 'Media upload authorized', createChatMediaUploadSignature(request.user!.id, type, options.cloudinary));
+    },
+  );
 
   router.post(
     '/avatar/signature',

@@ -19,6 +19,14 @@ const senderSnapshotSchema = new Schema(
   { _id: false },
 );
 
+const attachmentSchema = new Schema({
+  type: { type: String, enum: ['image', 'video'], required: true },
+  url: { type: String, required: true, trim: true },
+  publicId: { type: String, required: true, trim: true },
+  format: { type: String, required: true, trim: true },
+  bytes: { type: Number, required: true, min: 1 },
+}, { _id: false });
+
 const messageSchema = new Schema(
   {
     conversationId: {
@@ -48,10 +56,11 @@ const messageSchema = new Schema(
     },
     content: {
       type: String,
-      required: true,
+      required: function (this: { attachment?: unknown }) { return !this.attachment; },
       trim: true,
       maxlength: MAX_MESSAGE_LENGTH,
     },
+    attachment: { type: attachmentSchema, default: null },
     clientMessageId: {
       type: String,
       required: true,

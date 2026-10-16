@@ -19,7 +19,7 @@ function toGeminiContents(
   messages: Array<{
     senderType?: 'user' | 'assistant';
     senderSnapshot: { displayName: string };
-    content: string;
+    content?: string | null;
     _id: Types.ObjectId;
   }>,
   requestMessageId: string,
@@ -28,9 +28,10 @@ function toGeminiContents(
   for (const message of messages) {
     const role = message.senderType === 'assistant' ? 'model' : 'user';
     const isRequest = message._id.toString() === requestMessageId;
+    const content = message.content ?? '';
     const promptText = isRequest
-      ? parseAiMention(message.content)?.prompt ?? message.content
-      : message.content.replace(/^\s*@ai(?:\s+|$)/i, '').trim();
+      ? parseAiMention(content)?.prompt ?? content
+      : content.replace(/^\s*@ai(?:\s+|$)/i, '').trim();
     const boundedText = promptText.slice(0, isRequest ? MAX_PROMPT_CHARS : MAX_CONTEXT_MESSAGE_CHARS);
     if (!boundedText) continue;
     const text = role === 'user'
@@ -72,7 +73,7 @@ export async function generateConversationReply(input: {
   if (
     !requestMessage ||
     !requestMessage.senderId.equals(userId) ||
-    !parseAiMention(requestMessage.content)?.prompt
+    !parseAiMention(requestMessage.content ?? '')?.prompt
   ) {
     throw new AppError(400, 'AI_REQUEST_NOT_VISIBLE', 'The AI request is no longer visible');
   }

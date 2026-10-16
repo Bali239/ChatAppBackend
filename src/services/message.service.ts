@@ -28,7 +28,8 @@ function toPersistedMessage(message: {
   senderType?: 'user' | 'assistant';
   replyToMessageId?: Types.ObjectId | null;
   senderSnapshot: { displayName: string; avatarUrl?: string | null };
-  content: string;
+  content?: string | null;
+  attachment?: { type: 'image' | 'video'; url: string; publicId: string; format: string; bytes: number } | null;
   clientMessageId: string;
   createdAt: Date;
 }): PersistedMessage {
@@ -42,7 +43,8 @@ function toPersistedMessage(message: {
       displayName: message.senderSnapshot.displayName,
       avatarUrl: message.senderSnapshot.avatarUrl ?? null,
     },
-    content: message.content,
+    content: message.content ?? '',
+    attachment: message.attachment ?? null,
     clientMessageId: message.clientMessageId,
     createdAt: message.createdAt.toISOString(),
   };
@@ -80,11 +82,12 @@ export async function persistMessage(input: {
   conversationId: string;
   content: string;
   clientMessageId: string;
+  attachment?: { type: 'image' | 'video'; url: string; publicId: string; format: string; bytes: number };
 }) {
   const senderId = parseObjectId(input.userId, 'INVALID_USER_ID');
   const conversationId = parseObjectId(input.conversationId, 'INVALID_CONVERSATION_ID');
   const content = input.content.trim();
-  if (!content || content.length > MAX_MESSAGE_LENGTH) {
+  if ((!content && !input.attachment) || content.length > MAX_MESSAGE_LENGTH) {
     throw new AppError(400, 'INVALID_MESSAGE', 'Message content is invalid');
   }
   if (!/^[A-Za-z0-9_-]{8,128}$/.test(input.clientMessageId)) {
@@ -107,7 +110,7 @@ export async function persistMessage(input: {
   const idempotencyFilter = { conversationId, senderId, clientMessageId: input.clientMessageId };
   let message = await Message.findOne(idempotencyFilter).lean();
   if (message) {
-    if (message.content !== content) {
+    if (message.content !== content || JSON.stringify(message.attachment ?? null) !== JSON.stringify(input.attachment ?? null)) {
       throw new AppError(409, 'IDEMPOTENCY_CONFLICT', 'Message retry does not match the original');
     }
     await updateConversationActivity(message);
@@ -136,6 +139,7 @@ export async function persistMessage(input: {
         avatarUrl: sender.avatarUrl ?? null,
       },
       content,
+      attachment: input.attachment ?? null,
       clientMessageId: input.clientMessageId,
     });
   } catch (error) {

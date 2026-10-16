@@ -17,6 +17,7 @@ export interface PersistedMessage {
     avatarUrl: string | null;
   };
   content: string;
+  attachment?: { type: 'image' | 'video'; url: string; publicId: string; format: string; bytes: number } | null;
   clientMessageId: string;
   createdAt: string;
 }
@@ -31,7 +32,7 @@ export interface ClientToServerEvents {
   'conversation:join': (payload: { conversationId: string }) => void;
   'conversation:leave': (payload: { conversationId: string }) => void;
   'message:send': (
-    payload: { conversationId: string; content: string; clientMessageId: string },
+    payload: { conversationId: string; content: string; clientMessageId: string; attachment?: PersistedMessage['attachment'] },
     acknowledge?: (result: MessageAcknowledgement) => void,
   ) => void;
   'message:delivered': (payload: { conversationId: string; messageId: string }) => void;
@@ -90,9 +91,14 @@ export const conversationPayloadSchema = z.object({
 
 export const messageSendPayloadSchema = z.object({
   conversationId: objectIdSchema,
-  content: z.string().trim().min(1).max(5_000),
+  content: z.string().trim().max(5_000),
+  attachment: z.object({ type: z.enum(['image', 'video']), url: z.string().url().refine((url) => url.startsWith('https://res.cloudinary.com/')), publicId: z.string().min(1).max(240), format: z.string().min(1).max(10), bytes: z.number().int().positive() }).strict().optional(),
   clientMessageId: z.string().min(8).max(128).regex(/^[A-Za-z0-9_-]+$/),
-}).strict();
+}).strict()
+  .refine((payload) => Boolean(payload.content || payload.attachment), 'Message content or attachment is required')
+  .refine((payload) => !payload.attachment || (payload.attachment.type === 'image'
+    ? ['jpg', 'png', 'webp'].includes(payload.attachment.format) && payload.attachment.bytes <= 10 * 1024 * 1024
+    : payload.attachment.format === 'mp4' && payload.attachment.bytes <= 100 * 1024 * 1024), 'Attachment format or size is invalid');
 
 export const messagePositionPayloadSchema = z.object({
   conversationId: objectIdSchema,

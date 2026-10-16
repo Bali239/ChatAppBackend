@@ -7,6 +7,9 @@ import { AppError } from '../utils/error.js';
 const AVATAR_FOLDER_ROOT = 'chatapp/avatars';
 const ALLOWED_FORMATS = ['jpg', 'png', 'webp'] as const;
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+const CHAT_MEDIA_FOLDER_ROOT = 'chatapp/media';
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 
 export interface CloudinaryCredentials {
   cloudName: string;
@@ -66,6 +69,25 @@ export function createAvatarUploadSignature(
     allowedFormats: [...ALLOWED_FORMATS],
     maxBytes: MAX_AVATAR_BYTES,
     uploadUrl: `https://api.cloudinary.com/v1_1/${encodeURIComponent(credentials.cloudName)}/image/upload`,
+  };
+}
+
+export function createChatMediaUploadSignature(userId: string, kind: 'image' | 'video', credentials: CloudinaryCredentials) {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const owner = createHash('sha256').update(userId).digest('hex');
+  const folder = `${CHAT_MEDIA_FOLDER_ROOT}/${owner}`;
+  const publicId = `media-${randomUUID()}`;
+  const allowedFormats = kind === 'image' ? ['jpg', 'png', 'webp'] : ['mp4'];
+  const signedParameters = {
+    allowed_formats: allowedFormats.join(','), folder, overwrite: false, public_id: publicId,
+    timestamp, upload_preset: credentials.avatarUploadPreset,
+  };
+  return {
+    cloudName: credentials.cloudName, apiKey: credentials.apiKey,
+    signature: cloudinary.utils.api_sign_request(signedParameters, credentials.apiSecret),
+    timestamp, folder, publicId, uploadPreset: credentials.avatarUploadPreset, allowedFormats,
+    maxBytes: kind === 'image' ? MAX_IMAGE_BYTES : MAX_VIDEO_BYTES, resourceType: kind,
+    uploadUrl: `https://api.cloudinary.com/v1_1/${encodeURIComponent(credentials.cloudName)}/${kind}/upload`,
   };
 }
 
