@@ -4,7 +4,7 @@ import { createCorsOptions, isTrustedOrigin } from '../config/cors.js';
 import { verifyAccessToken } from '../auth/tokens.js';
 import { User } from '../models/user.model.js';
 import { AuthSession } from '../models/auth-session.model.js';
-import { clearUserSendRateLimit, registerChatEvents } from './chat-events.js';
+import { registerChatEvents } from './chat-events.js';
 import type {
   ChatSocket,
   ChatSocketServer,
@@ -82,7 +82,6 @@ export function attachSocketServer(
     logger.info('Socket connected');
     socket.on('disconnect', () => {
       if (removeUserConnection(userId, socket.id)) {
-        clearUserSendRateLimit(userId);
         io.emit('presence:update', { userId, isOnline: false });
       }
       logger.info('Socket disconnected');

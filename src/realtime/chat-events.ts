@@ -15,10 +15,6 @@ import { markConversationRead } from '../services/message-history.service.js';
 import { AppError } from '../utils/error.js';
 import type { AppLogger } from '../utils/logger.js';
 
-const SENDS_PER_WINDOW = 20;
-const SEND_WINDOW_MS = 10_000;
-const AI_SENDS_PER_WINDOW = 5;
-const AI_SEND_WINDOW_MS = 60_000;
 const TYPING_EXPIRY_MS = 5_000;
 const TYPING_THROTTLE_MS = 250;
 
@@ -28,8 +24,6 @@ interface TypingEntry {
   timeout: NodeJS.Timeout;
 }
 
-const sendTimesByUser = new Map<string, number[]>();
-const aiSendTimesByUser = new Map<string, number[]>();
 const lastTypingEventBySocket = new Map<string, number>();
 const typingByConversationAndUser = new Map<string, TypingEntry>();
 
@@ -72,32 +66,6 @@ async function assertSocketSession(socket: ChatSocket): Promise<void> {
   }
 }
 
-function allowMessageSend(userId: string): boolean {
-  const now = Date.now();
-  const recentSends = (sendTimesByUser.get(userId) ?? [])
-    .filter((sentAt) => now - sentAt < SEND_WINDOW_MS);
-  if (recentSends.length >= SENDS_PER_WINDOW) {
-    sendTimesByUser.set(userId, recentSends);
-    return false;
-  }
-  recentSends.push(now);
-  sendTimesByUser.set(userId, recentSends);
-  return true;
-}
-
-function allowAiSend(userId: string): boolean {
-  const now = Date.now();
-  const recentSends = (aiSendTimesByUser.get(userId) ?? [])
-    .filter((sentAt) => now - sentAt < AI_SEND_WINDOW_MS);
-  if (recentSends.length >= AI_SENDS_PER_WINDOW) {
-    aiSendTimesByUser.set(userId, recentSends);
-    return false;
-  }
-  recentSends.push(now);
-  aiSendTimesByUser.set(userId, recentSends);
-  return true;
-}
-
 function emitAiStatus(
   io: ChatSocketServer,
   participantIds: readonly string[],
@@ -118,7 +86,7 @@ async function generateAndBroadcastAiReply(input: {
   conversationId: string;
   requestMessageId: string;
   participantIds: string[];
-}): Promise<void> {
+}): Promise<Awaited<ReturnType<typeof persistAssistantMessage>>> {
   emitAiStatus(input.io, input.participantIds, input.conversationId, input.requestMessageId, true);
   let failureStage: 'generation' | 'persistence' = 'generation';
   try {
@@ -138,6 +106,7 @@ async function generateAndBroadcastAiReply(input: {
     for (const participantId of result.participantIds) {
       input.io.to(userRoom(participantId)).emit('message:new', result.message);
     }
+    return result;
   } catch (error) {
     const providerError = typeof error === 'object' && error !== null
       ? error as { status?: unknown; statusCode?: unknown; code?: unknown }
@@ -159,14 +128,10 @@ async function generateAndBroadcastAiReply(input: {
       requestMessageId: input.requestMessageId,
       message: 'Gemini could not respond. Please try again shortly.',
     });
+    throw new AppError(502, 'AI_GENERATION_FAILED', 'Gemini could not respond. Please try again shortly.');
   } finally {
     emitAiStatus(input.io, input.participantIds, input.conversationId, input.requestMessageId, false);
   }
-}
-
-export function clearUserSendRateLimit(userId: string): void {
-  sendTimesByUser.delete(userId);
-  aiSendTimesByUser.delete(userId);
 }
 
 function emitTypingUpdate(
@@ -296,14 +261,12 @@ export function registerChatEvents(
   });
 
   socket.on('message:send', (payload, acknowledge) => {
+    let persistedRequestMessage: MessageAcknowledgement['message'];
     void (async () => {
       await assertSocketSession(socket);
       const parsed = messageSendPayloadSchema.safeParse(payload);
       if (!parsed.success) {
         throw new AppError(400, 'INVALID_MESSAGE', 'Message payload is invalid');
-      }
-      if (!allowMessageSend(socket.data.userId)) {
-        throw new AppError(429, 'RATE_LIMITED', 'Message send rate limit exceeded');
       }
       const aiRequest = parseAiMention(parsed.data.content);
       if (aiRequest && !aiRequest.prompt) {
@@ -312,23 +275,18 @@ export function registerChatEvents(
       if (aiRequest && !geminiApiKey) {
         throw new AppError(503, 'AI_UNAVAILABLE', 'Gemini is not configured');
       }
-      if (aiRequest && !allowAiSend(socket.data.userId)) {
-        throw new AppError(429, 'AI_RATE_LIMITED', 'Gemini request limit exceeded. Try again in a minute.');
-      }
       const result = await persistMessage({
         userId: socket.data.userId,
         conversationId: parsed.data.conversationId,
         content: parsed.data.content,
         clientMessageId: parsed.data.clientMessageId,
       });
-      const success: MessageAcknowledgement = { ok: true, message: result.message };
+      persistedRequestMessage = result.message;
       for (const participantId of result.participantIds) {
         io.to(userRoom(participantId)).emit('message:new', result.message);
       }
-      socket.emit('message:ack', success);
-      acknowledge?.(success);
       if (aiRequest && !result.duplicate && geminiApiKey) {
-        void generateAndBroadcastAiReply({
+        const aiResult = await generateAndBroadcastAiReply({
           io,
           logger,
           apiKey: geminiApiKey,
@@ -337,9 +295,20 @@ export function registerChatEvents(
           requestMessageId: result.message.id,
           participantIds: result.participantIds,
         });
+        const success: MessageAcknowledgement = { ok: true, message: aiResult.message };
+        socket.emit('message:ack', success);
+        acknowledge?.(success);
+        return;
       }
+      const success: MessageAcknowledgement = { ok: true, message: result.message };
+      socket.emit('message:ack', success);
+      acknowledge?.(success);
     })().catch((error: unknown) => {
-      const failure: MessageAcknowledgement = { ok: false, error: toSocketError(error) };
+      const failure: MessageAcknowledgement = {
+        ok: false,
+        message: persistedRequestMessage,
+        error: toSocketError(error),
+      };
       logger.warn({ code: failure.error?.code }, 'Socket message send failed');
       socket.emit('message:ack', failure);
       acknowledge?.(failure);
