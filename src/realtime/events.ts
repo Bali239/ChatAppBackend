@@ -28,6 +28,13 @@ export interface MessageAcknowledgement {
   error?: SocketError;
 }
 
+export interface ReadAcknowledgement {
+  ok: boolean;
+  lastReadAt?: string | null;
+  lastReadMessageId?: string | null;
+  error?: SocketError;
+}
+
 export interface ClientToServerEvents {
   'conversation:join': (payload: { conversationId: string }) => void;
   'conversation:leave': (payload: { conversationId: string }) => void;
@@ -36,7 +43,10 @@ export interface ClientToServerEvents {
     acknowledge?: (result: MessageAcknowledgement) => void,
   ) => void;
   'message:delivered': (payload: { conversationId: string; messageId: string }) => void;
-  'conversation:read': (payload: { conversationId: string; messageId: string }) => void;
+  'conversation:read': (
+    payload: { conversationId: string; messageId: string },
+    acknowledge?: (result: ReadAcknowledgement) => void,
+  ) => void;
   'typing:start': (payload: { conversationId: string }) => void;
   'typing:stop': (payload: { conversationId: string }) => void;
 }

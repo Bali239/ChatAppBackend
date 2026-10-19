@@ -1,4 +1,4 @@
-import type { ChatSocket, ChatSocketServer, MessageAcknowledgement, SocketError } from './events.js';
+import type { ChatSocket, ChatSocketServer, MessageAcknowledgement, ReadAcknowledgement, SocketError } from './events.js';
 import {
   conversationPayloadSchema,
   messagePositionPayloadSchema,
@@ -6,7 +6,6 @@ import {
 } from './events.js';
 import { Conversation } from '../models/conversation.model.js';
 import { ConversationMember } from '../models/conversation-member.model.js';
-import { Message } from '../models/message.model.js';
 import { User } from '../models/user.model.js';
 import { AuthSession } from '../models/auth-session.model.js';
 import { acknowledgeMessageDelivered, persistAssistantMessage, persistMessage } from '../services/message.service.js';
@@ -345,30 +344,41 @@ export function registerChatEvents(
     })().catch((error: unknown) => socket.emit('socket:error', toSocketError(error)));
   });
 
-  socket.on('conversation:read', (payload) => {
+  socket.on('conversation:read', (payload, acknowledge) => {
     void (async () => {
       await assertSocketSession(socket);
       const parsed = messagePositionPayloadSchema.safeParse(payload);
       if (!parsed.success) {
         throw new AppError(400, 'INVALID_PAYLOAD', 'Read position is invalid');
       }
-      const message = await Message.findOne({
-        _id: parsed.data.messageId,
-        conversationId: parsed.data.conversationId,
-      }).select('senderId').lean();
       const position = await markConversationRead(
         socket.data.userId,
         parsed.data.conversationId,
         parsed.data.messageId,
       );
-      if (message && !message.senderId.equals(socket.data.userId)) {
-        io.to(userRoom(message.senderId.toString())).emit('message:read', {
-          conversationId: parsed.data.conversationId,
-          messageId: position.lastReadMessageId ?? parsed.data.messageId,
-          readAt: position.lastReadAt?.toISOString() ?? new Date().toISOString(),
-        });
+      const conversation = await Conversation.findById(parsed.data.conversationId)
+        .select('participantIds')
+        .lean();
+      if (!conversation) throw new AppError(404, 'CONVERSATION_NOT_FOUND', 'Conversation was not found');
+      for (const participantId of conversation.participantIds) {
+        if (!participantId.equals(socket.data.userId)) {
+          io.to(userRoom(participantId.toString())).emit('message:read', {
+            conversationId: parsed.data.conversationId,
+            messageId: position.lastReadMessageId ?? parsed.data.messageId,
+            readAt: position.lastReadAt?.toISOString() ?? new Date().toISOString(),
+          });
+        }
       }
-    })().catch((error: unknown) => socket.emit('socket:error', toSocketError(error)));
+      acknowledge?.({
+        ok: true,
+        lastReadAt: position.lastReadAt?.toISOString() ?? null,
+        lastReadMessageId: position.lastReadMessageId,
+      });
+    })().catch((error: unknown) => {
+      const failure: ReadAcknowledgement = { ok: false, error: toSocketError(error) };
+      acknowledge?.(failure);
+      socket.emit('socket:error', failure.error!);
+    });
   });
 
   socket.on('typing:start', (payload) => {
