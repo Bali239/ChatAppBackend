@@ -54,16 +54,16 @@ export function createApp(options: AppOptions): Express {
   app.use(createHttpLogger(options.logger));
 
   const api = express.Router();
-  api.use(
-    rateLimit({
-      windowMs: 15 * 60 * 1000,
-      limit: 100,
-      standardHeaders: true,
-      legacyHeaders: false,
-      handler: (_request, response) =>
-        sendErrorResponse(response, 429, 'Too many requests', { code: 'RATE_LIMITED' }),
-    }),
-  );
+  // api.use(
+  //   rateLimit({
+  //     windowMs: 15 * 60 * 1000,
+  //     limit: 100,
+  //     standardHeaders: true,
+  //     legacyHeaders: false,
+  //     handler: (_request, response) =>
+  //       sendErrorResponse(response, 429, 'Too many requests', { code: 'RATE_LIMITED' }),
+  //   }),
+  // );
   api.use(createHealthRouter(options.getDatabaseStatus));
   api.use('/auth', createAuthRouter({
     ...options.auth,
